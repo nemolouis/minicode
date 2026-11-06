@@ -55,7 +55,14 @@ def replay_run(traj_path: str | Path, tasks_root: str | Path = "tasks") -> dict:
     if not any(e["event"] == "run_end" for e in old):
         return {"status": "skipped", "reason": "the recording has no run_end (the run was interrupted), so there is no end to compare"}
     cfg, meta = start["config"], start.get("meta") or {}
+    features = tuple(cfg.get("features", ()))
+    if "explore" in features:
+        return {"status": "skipped", "reason": "uses the explore sub-agent: its model calls are recorded in separate trajectories, so the parent cannot be replayed alone"}
     builtin = set(build_tools(Workspace(".")))
+    if "glob" in features:
+        builtin.add("glob")
+    if "todo" in features:
+        builtin.add("todo_write")
     unknown = set(cfg["tools"]) - builtin
     if unknown:
         return {"status": "skipped", "reason": f"uses tools that are not built in ({sorted(unknown)}): MCP runs cannot be replayed"}
@@ -83,7 +90,7 @@ def replay_run(traj_path: str | Path, tasks_root: str | Path = "tasks") -> dict:
             max_steps=cfg["max_steps"], max_tokens=cfg["max_tokens"], context_limit=cfg["context_limit"],
             keep_recent=cfg["keep_recent"], compact_regrowth=cfg.get("compact_regrowth", 1.0),
             temperature=cfg.get("temperature"), disabled_tools=tuple(sorted(builtin - set(cfg["tools"]))),
-            system=start.get("system") or SYSTEM_PROMPT)
+            system=start.get("system") or SYSTEM_PROMPT, features=features)
         try:
             agent.run(start["task"])
         except ReplayMiss as e:                    # not expected: the loop catches exceptions; kept for safety

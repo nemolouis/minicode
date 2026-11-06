@@ -1,0 +1,16 @@
+{
+  "name": "feat-todo-flash",
+  "model": "deepseek-flash",
+  "temperature": 0.0,
+  "max_steps": 50,
+  "max_tokens": 16384,
+  "context_limit": 100000,
+  "keep_recent": 8,
+  "disabled_tools": [],
+  "hypothesis": "PREDICTION (written before running; baseline = flash, B-layer dev 13 tasks, ~90%): todo_write is used on <50% of runs and the pass rate stays within +-8 points of baseline (flash is near the ceiling, so no effect is detectable at 13 tasks x 3). Mean steps rise by 0-2 (the todo calls themselves).",
+  "base_url": "https://api.deepseek.com",
+  "api_key_env": "DEEPSEEK_API_KEY",
+  "features": [
+    "todo"
+  ]
+}

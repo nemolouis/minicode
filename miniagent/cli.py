@@ -46,6 +46,9 @@ def main(argv=None) -> int:
     ap.add_argument("--temperature", type=float, default=None)
     ap.add_argument("--mcp-config", help="JSON file with a list of MCP servers: [{name, command, allow, trusted?}]")
     ap.add_argument("--disable-tools", default="", help="comma-separated built-in tools to hide, e.g. bash,grep,read_file")
+    ap.add_argument("--features", default="", help="comma-separated opt-in features: memory (AGENTS.md), todo, explore (read-only sub-agent), glob")
+    ap.add_argument("--no-parallel", action="store_true", help="run tool calls one at a time")
+    ap.add_argument("--no-validate", action="store_true", help="do not check tool arguments against their schemas")
     ap.add_argument("--sandbox", action="store_true", help="run bash in a Docker container (no network, read-only root, only the workspace mounted)")
     ap.add_argument("--runs-dir", default="runs")
     args = ap.parse_args(argv)
@@ -68,6 +71,8 @@ def main(argv=None) -> int:
             confirm=_make_confirm(args.yes), trajectory=Trajectory(run_dir), max_steps=args.max_steps,
             context_limit=args.context_limit, keep_recent=args.keep_recent, compact_regrowth=args.compact_regrowth,
             temperature=args.temperature, extra_tools=mcp_tools,
+            features=tuple(f for f in args.features.split(",") if f), parallel_tools=not args.no_parallel,
+            validate_args=not args.no_validate,
             disabled_tools=tuple(t for t in args.disable_tools.split(",") if t),
         )
         res = agent.run(args.task)

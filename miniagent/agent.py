@@ -3,13 +3,17 @@ from __future__ import annotations
 
 import hashlib
 import json
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Callable
 
 from .client import ModelResponse
+from .features import FEATURES, explore_tool, render_todos, todo_tool, with_project_memory
 from .sandbox import SandboxError
-from .tools import Tool, ToolError, Workspace, build_tools
+from .schema import signature, validate
+from .tools import Tool, ToolError, Workspace, build_tools, glob_tool
 from .trajectory import Trajectory
 
 SYSTEM_PROMPT = """You are a coding agent working inside a git-style repository. \
@@ -59,11 +63,37 @@ class Agent:
     meta: dict = field(default_factory=dict)  # task_id, config name, ... -> run_start
     extra_tools: dict = field(default_factory=dict)  # e.g. MCP tools: name -> Tool (see miniagent.mcp.client)
     log_reasoning: bool = False  # also write the model's visible thinking into model_call events (large; for SFT data)
+    # Run the read-only tool calls of one model turn concurrently (results and log lines keep the model's order).
+    parallel_tools: bool = True
+    # Check tool arguments against the tool's JSON schema before running it; a bad call gets a precise error instead of a KeyError.
+    validate_args: bool = True
+    # Opt-in features, see miniagent.features: "memory" (AGENTS.md in the system prompt), "todo" (todo_write tool),
+    # "explore" (read-only sub-agent tool), "glob" (file listing tool).
+    features: tuple[str, ...] = ()
+    explore_max_steps: int = 12
 
     def __post_init__(self):
-        self.tools: dict[str, Tool] = {
-            n: t for n, t in {**build_tools(self.workspace), **self.extra_tools}.items() if n not in self.disabled_tools
-        }
+        bad = set(self.features) - FEATURES
+        if bad:
+            raise ValueError(f"unknown features {sorted(bad)}; known: {sorted(FEATURES)}")
+        self.todos: list[dict] = []
+        self.sub_usage = {"input": 0, "output": 0}      # tokens spent by sub-agents (explore); not part of this loop's model_calls
+        self._usage_lock = threading.Lock()
+        if "memory" in self.features:
+            self.system = with_project_memory(self.system, self.workspace.root)
+        tools = {**build_tools(self.workspace), **self.extra_tools}
+        if "glob" in self.features or "explore" in self.features:
+            tools["glob"] = glob_tool(self.workspace)
+        if "todo" in self.features:
+            tools["todo_write"] = todo_tool(self)
+        if "explore" in self.features:
+            tools["explore"] = explore_tool(self)
+        self.tools: dict[str, Tool] = {n: t for n, t in tools.items() if n not in self.disabled_tools}
+
+    def add_sub_usage(self, input_tokens: int, output_tokens: int) -> None:
+        with self._usage_lock:
+            self.sub_usage["input"] += input_tokens
+            self.sub_usage["output"] += output_tokens
 
     # ------------------------------------------------------------ main loop
     def run(self, task: str) -> RunResult:
@@ -73,6 +103,7 @@ class Agent:
             config={"max_steps": self.max_steps, "context_limit": self.context_limit,
                     "keep_recent": self.keep_recent, "compact_regrowth": self.compact_regrowth, "max_tokens": self.max_tokens,
                     "temperature": self.temperature, "tools": sorted(self.tools),
+                    **({"features": sorted(self.features)} if self.features else {}),
                     "system_sha1": hashlib.sha1(self.system.encode()).hexdigest()[:12]},
             # full text, so the exact model input can be rebuilt later (SFT export) without guessing from a hash
             system=self.system, tool_specs=[t.spec() for t in self.tools.values()])
@@ -120,7 +151,7 @@ class Agent:
                 final_text = resp.text
 
                 if resp.tool_calls:
-                    messages.extend(self._run_tool(step, c) for c in calls)
+                    messages.extend(self._run_tools(step, calls))
                     continue
                 status = "done" if resp.finish_reason == "stop" else resp.finish_reason
                 break
@@ -129,12 +160,53 @@ class Agent:
                                 input_tokens=in_tok, output_tokens=out_tok, final_text=final_text)
             return RunResult("error", step, final_text, in_tok, out_tok, repr(e))
 
+        in_tok += self.sub_usage["input"]
+        out_tok += self.sub_usage["output"]       # sub-agent tokens are real spend: they count in the run totals
         self.trajectory.log("run_end", status=status, steps=step, input_tokens=in_tok,
-                            output_tokens=out_tok, final_text=final_text)
+                            output_tokens=out_tok, final_text=final_text,
+                            **({"subagent_input_tokens": self.sub_usage["input"], "subagent_output_tokens": self.sub_usage["output"]}
+                               if self.sub_usage["input"] or self.sub_usage["output"] else {}))
         return RunResult(status, step, final_text, in_tok, out_tok)
 
     # ---------------------------------------------------------------- tools
+    def _run_tools(self, step: int, calls: list[dict]) -> list[dict]:
+        """Run one turn's tool calls. Consecutive read-only calls run concurrently; anything else (writes, bash, calls
+        needing confirmation, bad calls) runs alone and in order, so it acts as a barrier. The results and the
+        `tool_result` log lines always come out in the order the model issued the calls."""
+        out: list[dict] = []
+        i = 0
+        while i < len(calls):
+            j = i
+            if self.parallel_tools:
+                while j < len(calls) and self._concurrent_ok(calls[j]):
+                    j += 1
+            if j - i >= 2:
+                batch = calls[i:j]
+                with ThreadPoolExecutor(max_workers=min(len(batch), 8)) as pool:
+                    futures = [pool.submit(self._execute, c) for c in batch]
+                    results = [f.result() for f in futures]           # SandboxError (infrastructure fault) re-raises here
+                for c, r in zip(batch, results):
+                    out.append(self._log_tool(step, c, r, parallel=len(batch)))
+                i = j
+            else:
+                out.append(self._run_tool(step, calls[i]))
+                i += 1
+        return out
+
+    def _concurrent_ok(self, call: dict) -> bool:
+        tool = self.tools.get(call["name"])
+        # a call with bad arguments may sit in the batch: _execute rejects it without running anything
+        return bool(tool and tool.read_only and not tool.needs_confirm and not call.get("parse_error"))
+
+    def _arg_errors(self, tool: Tool, args: dict) -> list[str]:
+        return validate(args, tool.input_schema) if self.validate_args else []
+
     def _run_tool(self, step: int, call: dict) -> dict:
+        return self._log_tool(step, call, self._execute(call))
+
+    def _execute(self, call: dict) -> dict:
+        """Run one call and return {output, is_error, approved, duration_s}. Does not log (safe to call from a worker thread
+        for read-only tools)."""
         name, args = call["name"], call["input"]
         t0 = time.time()
         approved, is_error = True, False
@@ -143,6 +215,8 @@ class Agent:
             out, is_error = f"unknown tool: {name}", True
         elif call.get("parse_error"):
             out, is_error = f"error: arguments are not valid JSON ({call['parse_error']})", True
+        elif errs := self._arg_errors(tool, args):
+            out, is_error = f"error: invalid arguments for {name}: {'; '.join(errs)}. Expected {signature(tool.input_schema)}", True
         else:
             if tool.needs_confirm and not self.confirm(name, args):
                 approved, is_error, out = False, True, "user denied this action; try a different approach or explain why it is needed"
@@ -157,10 +231,13 @@ class Agent:
                     out, is_error = f"error: bad arguments ({e!r})", True
                 except Exception as e:  # tool bug must not kill the run
                     out, is_error = f"error: {type(e).__name__}: {e}", True
-        self.trajectory.log("tool_result", step=step, tool_call_id=call["id"], name=name, input=args,
-                            output=out, is_error=is_error, approved=approved,
-                            duration_s=round(time.time() - t0, 3))
-        return {"role": "tool", "tool_call_id": call["id"], "content": out}
+        return {"output": out, "is_error": is_error, "approved": approved, "duration_s": round(time.time() - t0, 3)}
+
+    def _log_tool(self, step: int, call: dict, r: dict, parallel: int = 1) -> dict:
+        self.trajectory.log("tool_result", step=step, tool_call_id=call["id"], name=call["name"], input=call["input"],
+                            output=r["output"], is_error=r["is_error"], approved=r["approved"], duration_s=r["duration_s"],
+                            **({"parallel": parallel} if parallel > 1 else {}))
+        return {"role": "tool", "tool_call_id": call["id"], "content": r["output"]}
 
     # ----------------------------------------------------------- compaction
     def _compact_trigger(self, floor: int | None) -> float:
@@ -204,7 +281,8 @@ class Agent:
             self.trajectory.log("compaction", kind="summary_failed", est_tokens_before=after, est_tokens_after=after,
                                 trigger_input_tokens=trigger_tokens, finish_reason=resp.finish_reason)
             return out
-        head = {"role": "user", "content": f"{out[0]['content']}\n\n[Progress so far, summarised from earlier steps]\n{summary}"}
+        todo = f"\n\n[Current todo list]\n{render_todos(self.todos)}" if self.todos else ""
+        head = {"role": "user", "content": f"{out[0]['content']}\n\n[Progress so far, summarised from earlier steps]\n{summary}{todo}"}
         new = [head] + out[i:]
         self.trajectory.log("compaction", kind="summary", est_tokens_before=after,
                             est_tokens_after=_estimate_tokens(new), summary=summary, trigger_input_tokens=trigger_tokens)

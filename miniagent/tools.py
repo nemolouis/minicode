@@ -38,6 +38,7 @@ class Tool:
     input_schema: dict
     func: Callable[[dict], str]
     needs_confirm: bool = False
+    read_only: bool = False   # no side effects and no confirmation: calls of such tools in one turn may run concurrently
 
     def spec(self) -> dict:
         return {"type": "function", "function": {
@@ -150,6 +151,21 @@ class Workspace:
             raise ToolError(f"command timed out after {timeout}s")
         return truncate(f"exit code: {r.returncode}\n{r.stdout}{r.stderr}".rstrip())
 
+    def glob(self, args: dict) -> str:
+        pat = args["pattern"]
+        if pat.startswith("/") or ".." in Path(pat).parts:
+            raise ToolError("pattern must be relative and stay inside the workspace")
+        out = []
+        for f in sorted(self.root.glob(pat)):
+            if not f.is_file() or SKIP_DIRS & set(f.relative_to(self.root).parts):
+                continue
+            if self.root not in f.resolve().parents:          # a symlink pointing out of the workspace
+                continue
+            out.append(f.relative_to(self.root).as_posix())
+            if len(out) >= 200:
+                return "\n".join(out) + "\n... (stopped at 200 paths)"
+        return "\n".join(out) or "no matches"
+
     def grep(self, args: dict) -> str:
         try:
             rx = re.compile(args["pattern"])
@@ -180,7 +196,7 @@ def build_tools(ws: Workspace) -> dict[str, Tool]:
         Tool("read_file", "Read a text file with line numbers. Paths are relative to the workspace root.",
              S(path={"type": "string"}, offset={"type": "integer", "description": "1-based start line", "optional": True},
                limit={"type": "integer", "description": "max lines (default 2000)", "optional": True}),
-             ws.read_file),
+             ws.read_file, read_only=True),
         Tool("write_file", "Create or overwrite a file with the given content.",
              S(path={"type": "string"}, content={"type": "string"}), ws.write_file, needs_confirm=True),
         Tool("edit_file", "Replace one exact occurrence of old_string with new_string. Fails if old_string is missing or not unique.",
@@ -192,6 +208,14 @@ def build_tools(ws: Workspace) -> dict[str, Tool]:
         Tool("grep", "Regex search over files (skips .git, node_modules, venvs). Returns path:line:text.",
              S(pattern={"type": "string"}, path={"type": "string", "description": "file or dir, default '.'", "optional": True},
                glob={"type": "string", "description": "e.g. '*.py'", "optional": True}),
-             ws.grep),
+             ws.grep, read_only=True),
     ]
     return {t.name: t for t in tools}
+
+
+def glob_tool(ws: Workspace) -> Tool:
+    """Opt-in (Agent features=("glob",)): list files by pattern. Kept out of build_tools so existing runs keep their tool set."""
+    return Tool("glob", "List files matching a glob pattern relative to the workspace root, e.g. '**/*.py' or 'tests/*.py' "
+                "(skips .git, node_modules, venvs). Returns up to 200 paths.",
+                {"type": "object", "properties": {"pattern": {"type": "string"}}, "required": ["pattern"]},
+                ws.glob, read_only=True)

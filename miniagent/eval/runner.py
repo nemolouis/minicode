@@ -60,6 +60,8 @@ def _run_one(task: Task, cfg: dict, repeat: int, out_dir: Path, client, keep_wor
                 keep_recent=cfg.get("keep_recent", 8), compact_regrowth=cfg.get("compact_regrowth", 1.0), system=system,
                 temperature=cfg.get("temperature"), disabled_tools=tuple(cfg.get("disabled_tools", ())),
                 extra_tools=mcp_tools, log_reasoning=bool(cfg.get("log_reasoning", False)),
+                features=tuple(cfg.get("features", ())), parallel_tools=bool(cfg.get("parallel_tools", True)),
+                validate_args=bool(cfg.get("validate_args", True)), explore_max_steps=cfg.get("explore_max_steps", 12),
                 meta={"task_id": task.id, "split": task.split, "task_hash": task.hash, "repeat": repeat,
                       "config_name": cfg.get("name"), "config_hash": config_hash(cfg)},
             )

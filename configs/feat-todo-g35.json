@@ -1,0 +1,19 @@
+{
+  "name": "feat-todo-g35",
+  "model": "gemini-3.5-flash-lite",
+  "temperature": null,
+  "max_steps": 50,
+  "max_tokens": 16384,
+  "context_limit": 100000,
+  "keep_recent": 8,
+  "disabled_tools": [],
+  "api_style": "gemini",
+  "base_url_env": "RELAY_BASE_URL",
+  "api_key_env": "RELAY_API_KEY",
+  "api_retries": 8,
+  "api_timeout": 300,
+  "hypothesis": "PREDICTION (baseline = g35-mid subset, 4 tasks x 3, 4/12): the 'fake completion' failure is a verification problem, not a planning one, so todo_write is expected NOT to move the pass rate beyond noise (4 tasks x 3 cannot resolve < 35 points). Recorded as a null-result check, not as a test of a gain.",
+  "features": [
+    "todo"
+  ]
+}

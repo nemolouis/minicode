@@ -17,7 +17,7 @@
 
 | 部分 | 状态 | 说明 |
 |---|---|---|
-| M1 agent 主循环与工具 | 完成 | 见"特性"；全仓库 392 个测试（不调用模型；需要 Docker 的测试在没有 Docker 时自动跳过） |
+| M1 agent 主循环与工具 | 完成 | 见"特性"；全仓库 410 个测试（不调用模型；需要 Docker 的测试在没有 Docker 时自动跳过，当前环境 377 通过、33 跳过） |
 | M2 评测 harness | 完成 | 任务集、dev/test 划分、隐藏测试、规则化判分、配对对比、断点续跑；实验结果见"结果"；test 集未跑 |
 | M3 轨迹回放 | 完成 | `miniagent-eval view`：浏览所有运行、逐步回放、两次运行并排对比；未做按条件导出轨迹 |
 | M4 MCP server | 完成 | 手写的 MCP 笔记服务器 + 客户端 + 越界/越权测试（见"MCP 服务器"）；未用官方客户端做互操作验证 |
@@ -46,10 +46,17 @@
 - **SFT 数据导出**（`miniagent-eval export`）：把通过的运行写成聊天格式 JSONL（system、tools、带 tool_calls 的 assistant、tool 消息）。只留隐藏测试通过且自己结束、没改测试、没发生压缩、没有非法工具参数的运行；默认只导出 `train` 划分（`--splits` 可改；dev、test 和没有划分的手写题都不会进训练数据）；精确重复去重；每种跳过原因都计数。`run_start` 现在记录系统提示词全文和工具定义；`log_reasoning: true` 时记录模型的可见思考。
 - **Docker 沙箱**（`miniagent/sandbox.py`，设计见 [docs/m5_sandbox_taskgen_design.md](docs/m5_sandbox_taskgen_design.md)）：`miniagent --sandbox`、`miniagent-eval run --sandbox`（或配置里 `"sandbox": true`）让 `bash` 和判分用的测试都跑在容器里：断网、根文件系统只读、去掉全部 capability、非 root、不传任何环境变量（拿不到 API key）、限制进程数/内存/CPU，只挂载工作区。每个运行一个长驻容器、每条命令一次 `docker exec`；命令超时或容器出问题时换新容器；输出有上限，洪水不会撑爆宿主内存。镜像用 `miniagent-eval sandbox-build` 构建，`sandbox-clean` 清理崩溃遗留的容器。沙箱自身故障（Docker 挂了等）让运行以 error 结束、不计入通过率，不会当作工具结果显示给模型。21 个测试（其中 18 个对真实容器做逃逸检查），对每个安全选项做过变异检验。**不是虚拟机**：容器与宿主共享内核。
 - **变异式任务生成**（`miniagent-eval gen`，`miniagent/taskgen/`）：对"能通过自带测试的种子库"注入一个小 bug（比较/算术/布尔运算符、条件取反、整数常量±1、break↔continue、删除语句），只在能通过全部筛选时才保留为任务：能编译、原代码通过全部测试、可见测试至少失败一个、失败数不多、两次结果一致且不超时、同一失败模式的任务有数量上限、构造出的任务本身再核对一遍。可见测试是种子测试的随机子集，隐藏测试是完整文件。不调用任何模型。生成的任务放在 `gen_tasks/`（不进入 `tasks/` 与既有的 dev/test 划分），**按种子库划分** train/dev/test，导出 SFT 数据默认只取 train。
+- **工具参数校验**（`miniagent/schema.py`，默认开）：调用前按工具的 JSON schema 检查 `type` / `required` / `enum` / `items`，错误信息指出哪个字段错了并给出期望的签名（如 `offset: expected integer, got str '5'. Expected {path: string, offset?: integer, ...}`），工具不会被执行。未知字段和不认识的 schema 关键字不报错。`--no-validate` / 配置 `validate_args: false` 可关闭。
+- **并行工具调用**（默认开）：同一轮里**连续**的只读工具（`read_file`、`grep`、`glob`、`explore`，无需确认）并发执行；写文件、`bash`、需要确认的工具单独按顺序执行，相当于屏障。返回给模型的消息和轨迹里的 `tool_result` 顺序始终是模型发出调用的顺序，并发的调用带 `parallel: N` 标记。`--no-parallel` / `parallel_tools: false` 关闭。
+- **可选功能**（默认全关，所以旧配置、旧轨迹、回放不受影响；`--features memory,todo,explore,glob` 或配置里 `"features": [...]`，实现在 `miniagent/features.py`）：
+  - `memory`：把工作区根目录的 `AGENTS.md`（没有则 `CLAUDE.md`）接到系统提示词后面，最多 8000 字符，符号链接不读；提示里写明这只是仓库主人的说明、不改变工具和权限。
+  - `todo`：`todo_write` 工具，每次调用替换整张清单，最多一项 `in_progress`；摘要式压缩时当前清单会被带进新的开头消息，不会随历史丢失。
+  - `explore`：只读子 agent。父 agent 调用 `explore(question)`，子 agent 在**全新的上下文**里只能用 `read_file` / `grep` / `glob`（`write_file`、`edit_file`、`bash` 被禁用；不能再开子 agent），最多 12 步，只把一份简短报告（≤6000 字符）返回给父 agent。子 agent 的轨迹写在父轨迹旁的 `explore-N/`，父轨迹里有一条 `subagent` 事件；子 agent 的 token 计入 `run_end` 和 `trajectory_stats`（按未缓存输入算），同一轮的多个 `explore` 并发执行。含 `explore` 的轨迹不能被确定性回放（子 agent 的模型调用不在父轨迹里）。
+  - `glob`：按模式列文件（最多 200 条，跳过 `.git` / 虚拟环境，拒绝 `..` 和指向工作区外的符号链接）。
 - **HTTP 服务**（可选，`miniagent/server.py`，见"HTTP 服务"）：把 `Agent.run` 包成 FastAPI 接口，路径白名单、在拷贝上运行、bash 只进沙箱、默认只监听本机。
 - **模型接入**：标准库实现，无第三方 SDK。两种协议：OpenAI 兼容的 chat completions（DeepSeek、智谱 GLM 已验证）和 **Gemini 原生 `generateContent`**（含思考签名的保存与回放，可经转发型中转使用）。配置文件里用 `base_url` / `base_url_env` / `api_key_env` / `extra_body` / `api_style` 指定，密钥永远从环境变量读
 
-**尚未实现**（避免误解）：参数 JSON schema 校验、并行工具调用、按条件导出轨迹到网页之外的格式（SFT 导出已有，见上）、HTTP 传输的 MCP。
+**尚未实现**（避免误解）：按条件导出轨迹到网页之外的格式（SFT 导出已有，见上）、HTTP 传输的 MCP；和主流 coding agent 相比还缺交互界面（TUI / 流式 / 中途打断）、按工具和命令前缀的权限规则、hooks / skills / 插件、git 集成（分支 / 提交 / PR）、会话恢复与检查点回退、LSP 诊断与符号索引、Anthropic 原生协议、plan 模式（只有 todo 工具）。**新增的校验 / 并行 / memory / todo / explore 只有单元测试和变异检验，还没有用真实模型在 dev 集上评测过**（没有 API 密钥），`configs/feat-*.json` 里写好了运行前的预测，见"可选功能的评测计划"。
 
 ## 快速开始
 
@@ -259,6 +266,15 @@ python3 -m venv .venv-mlx && .venv-mlx/bin/pip install --only-binary :all: mlx-l
 
 两者都只比基线多 1 题（赢 3 输 2），**在 13 题 × 1 次的样本下无法与噪声区分**；单次运行的噪声已经与这个差距相当。
 
+### 可选功能的评测计划（尚未运行）
+
+`configs/feat-todo-flash.json`、`feat-explore-flash.json`、`feat-todo-g35.json` 各只打开一个功能，预测写在 `hypothesis` 里（运行前写的）：flash 已接近天花板（约 90%），13 题 × 3 次下预计通过率变化在 ±8 点内、检测不到；`explore` 预计让父 agent 的输入 token 降而总成本升 10–40%（子 agent 要重新读文件）；`todo` 在 Gemini 弱模型上预计不改变"假完成"。跑完后若预测被推翻就照实记在 `docs/ablations.md`。校验和并行不改变模型看到的内容（除了参数错误时的报错文字），只会影响工具耗时，用 `--no-validate` / `--no-parallel` 做对照即可。
+
+```bash
+miniagent-eval run --config configs/feat-explore-flash.json --split dev --tasks b --repeat 3 --workers 4
+miniagent-eval compare results/<baseline-run> results/<feat-run>
+```
+
 ## 目录结构
 
 ```
@@ -332,6 +348,8 @@ agent 会执行模型生成的命令，存在风险：
 - [x] M5-d 后续:edit_file 提示、缩短 old_string、普通文本工具调用格式(三轮均无通过数提升,见 docs/next_phase_plan.md)
 - [x] HTTP 服务入口（FastAPI，可选依赖，19 个测试）
 - [ ] 已决定不做（下层 2026-10-28 收工，理由见 docs/next_phase_plan.md 末尾）：数据消融、一次 test、对照实验(只改 Adam 偏差修正)、切窗训练
+- [x] 对标主流 coding agent 补缺口：参数校验、并行只读工具、`AGENTS.md` 记忆、todo 工具、只读 explore 子 agent、glob（有测试和变异检验；**真实模型评测未跑**）
+- [ ] 上述功能在 dev 集上的评测（`configs/feat-*.json`，需要 API 额度）
 - [ ] 上下文工程(可选):摘要 vs 结构化笔记
 
 ## 许可证

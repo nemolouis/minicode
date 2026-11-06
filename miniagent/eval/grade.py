@@ -124,21 +124,27 @@ def last_test_green(events: list[dict]) -> bool | None:
 def trajectory_stats(events: list[dict]) -> dict:
     calls = [e for e in events if e["event"] == "model_call"]
     tools = [e for e in events if e["event"] == "tool_result"]
+    subs = [e for e in events if e["event"] == "subagent"]
     u = lambda k: sum(c["usage"].get(k, 0) or 0 for c in calls)
+    # sub-agent (explore) tokens are real spend but are not model_call events of this trajectory; their cache split is
+    # not reported, so they count as uncached input
+    sub_in, sub_out = sum(e.get("input_tokens", 0) for e in subs), sum(e.get("output_tokens", 0) for e in subs)
     total_in, cached = u("input_tokens"), u("cache_hit_tokens")  # input_tokens already includes cached
     return {
         "response_models": sorted({c.get("response_model") or "" for c in calls} - {""}),
         "steps": len(calls),
-        "uncached_input_tokens": total_in - cached,
+        "uncached_input_tokens": total_in - cached + sub_in,
         "cache_read_tokens": cached,
         "cache_creation_tokens": 0,
-        "output_tokens": u("output_tokens"),
+        "output_tokens": u("output_tokens") + sub_out,
         "reasoning_tokens": u("reasoning_tokens"),
         "truncated_calls": sum(1 for c in calls if c.get("finish_reason") == "length"),
         "model_latency_s": round(sum(c["latency_s"] for c in calls), 2),
         "last_test_green": last_test_green(events),
         "tool_calls": len(tools),
         "tool_errors": sum(1 for t in tools if t["is_error"]),
+        "parallel_tool_calls": sum(1 for t in tools if t.get("parallel", 1) > 1),
+        "subagent_runs": len(subs),
         "blocked_commands": sum(1 for t in tools if "blocked by safety policy" in str(t["output"])),
         "compactions": sum(1 for e in events if e["event"] == "compaction" and e["kind"] == "summary"),
     }

@@ -1,0 +1,16 @@
+{
+  "name": "feat-explore-flash",
+  "model": "deepseek-flash",
+  "temperature": 0.0,
+  "max_steps": 50,
+  "max_tokens": 16384,
+  "context_limit": 100000,
+  "keep_recent": 8,
+  "disabled_tools": [],
+  "hypothesis": "PREDICTION: flash calls explore in <40% of runs. Pass rate within +-8 points of baseline. Parent input tokens per run fall 0-25% on tasks where it is used, but total tokens (parent + sub-agent) rise, because the sub-agent re-reads files; I expect cost per run to go UP by 10-40%, not down.",
+  "base_url": "https://api.deepseek.com",
+  "api_key_env": "DEEPSEEK_API_KEY",
+  "features": [
+    "explore"
+  ]
+}
