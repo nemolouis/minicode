@@ -56,7 +56,7 @@ class Source:
                 out.append(rec)
             return out
         for d in sorted(p for p in self.root.iterdir() if p.is_dir() and (p / "trajectory.jsonl").exists()):
-            start, end = _read_json_line(d / "trajectory.jsonl", False), _read_json_line(d / "trajectory.jsonl", True)
+            end = _read_json_line(d / "trajectory.jsonl", True)
             out.append({"id": d.name, "task_id": d.name, "repeat": None, "passed": None,
                         "failure_class": (end or {}).get("status", "incomplete"), "steps": (end or {}).get("steps"),
                         "input_tokens": (end or {}).get("input_tokens"), "output_tokens": (end or {}).get("output_tokens"),

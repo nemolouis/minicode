@@ -107,7 +107,7 @@ def cmd_check(a):
     print(text[-1800:])
     # every assistant message of every example must be fully covered, nothing else
     bad = 0
-    for r, (ids, mask) in zip(rows, data):
+    for r, (_ids, mask) in zip(rows, data):
         n_asst = sum(1 for m in r["messages"] if m["role"] == "assistant")
         starts = sum(1 for k in range(len(mask)) if mask[k] and (k == 0 or not mask[k - 1]))
         bad += starts != n_asst
@@ -288,7 +288,6 @@ def fit_loss_budget(data):
 
 def cmd_train(a):
     import mlx.core as mx
-    import mlx.optimizers as optim
     from mlx.utils import tree_flatten
     from mlx_lm.tuner.trainer import TrainingArgs, TrainingCallback, train
     from mlx_lm.tuner.utils import linear_to_lora_layers, print_trainable_parameters

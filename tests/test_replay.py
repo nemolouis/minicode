@@ -141,7 +141,7 @@ def test_reasoning_is_logged_only_when_asked(tmp_path):
         d.mkdir()
         c = Script([("", [], 10)])
         orig = c.chat
-        c.chat = lambda **kw: (lambda r: (setattr(r, "reasoning", "thinking..."), r)[1])(orig(**kw))
+        c.chat = lambda orig=orig, **kw: (lambda r: (setattr(r, "reasoning", "thinking..."), r)[1])(orig(**kw))
         Agent(c, "m", Workspace(d), trajectory=Trajectory(d / "run"), log_reasoning=flag).run("t")
         mc = [e for e in events(d / "run") if e["event"] == "model_call"][0]
         assert ("reasoning" in mc) == flag

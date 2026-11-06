@@ -50,7 +50,8 @@ def test_bash_and_block(ws):
 
 
 def test_timeout_kills_whole_process_group(ws):
-    import subprocess, time
+    import subprocess
+    import time
     marker = "orphan_marker_for_test_xyz"
     with pytest.raises(ToolError):
         ws.bash({"command": f"python3 -c 'while True: pass  # {marker}' 2>&1 | tail -5", "timeout": 1})

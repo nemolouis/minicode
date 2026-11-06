@@ -58,7 +58,8 @@ def replay_run(traj_path: str | Path, tasks_root: str | Path = "tasks") -> dict:
     cfg, meta = start["config"], start.get("meta") or {}
     features = tuple(cfg.get("features", ()))
     if "explore" in features:
-        return {"status": "skipped", "reason": "uses the explore sub-agent: its model calls are recorded in separate trajectories, so the parent cannot be replayed alone"}
+        return {"status": "skipped", "reason": "uses the explore sub-agent: its model calls are recorded in separate trajectories, "
+                                               "so the parent cannot be replayed alone"}
     builtin = set(build_tools(Workspace(".")))
     if "glob" in features:
         builtin.add("glob")

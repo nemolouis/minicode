@@ -1,7 +1,11 @@
 """Reproducer for the host->container file-visibility lag (see miniagent/sandbox.py). Needs generated tasks.
 Flow: copy a task repo, grade it in a container, replace one file on the host, grade again; count wrong second results.
 Before grading used a fresh copy: about 8 of 100; after: 0 of 300.   usage: python scripts/check_sandbox_coherence.py [iterations-per-thread]"""
-import shutil, sys, tempfile, threading, time
+import shutil
+import sys
+import tempfile
+import threading
+import time
 from pathlib import Path
 from miniagent.eval.tasks import load_tasks
 from miniagent.eval.grade import copy_repo, add_hidden, run_tests

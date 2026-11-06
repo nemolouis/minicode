@@ -132,16 +132,24 @@ function normCall(e) {   // supports the current format and the early Anthropic-
 }
 function buildRun(events) {
   const run = { events, start: null, end: null, steps: [], trailing: [] };
-  let pending = [], cur = null;
+  let pending = [], pendingMarks = [], cur = null;
   for (const e of events) {
     if (e.event === "run_start") run.start = e;
     else if (e.event === "run_end") run.end = e;
     else if (e.event === "compaction") pending.push(e);
+    else if (e.event === "run_resume") pendingMarks.push("session resumed with a new instruction: " + clip(e.task, 120));
+    else if (e.event === "rewind") pendingMarks.push("rewound to step " + e.to_step + " (" + e.restored + " files restored, " + e.removed + " removed): the steps above from " + e.to_step + " on were abandoned");
     else if (e.event === "model_call") {
-      cur = { n: e.step, call: normCall(e), results: [], compactions: pending };
-      pending = []; run.steps.push(cur);
+      cur = { n: e.step, call: normCall(e), results: [], compactions: pending, marks: pendingMarks, subs: [], checkpoint: null };
+      pending = []; pendingMarks = []; run.steps.push(cur);
+    } else if (e.event === "subagent") {
+      if (cur) cur.subs.push(e);                    // logged while the step's tools run, so it belongs to the latest model call
+    } else if (e.event === "checkpoint") {
+      const owner = (cur && cur.n === e.step) ? cur : null;
+      if (owner) owner.checkpoint = e;
     } else if (e.event === "tool_result") {
-      const owner = run.steps.find(s => s.n === e.step) || cur;
+      // after a rewind the same step number occurs twice: the result belongs to the latest call with that number
+      const owner = (cur && cur.n === e.step) ? cur : [...run.steps].reverse().find(s => s.n === e.step) || cur;
       if (owner) owner.results.push(e);
     }
   }
@@ -235,6 +243,7 @@ function timeline(run, prefix) {
 function stepCard(s, prefix) {
   const c = s.call;
   const kids = [];
+  for (const m of s.marks || []) kids.push(h("div", { class: "banner" }, m));
   for (const comp of s.compactions) {
     kids.push(h("div", { class: "banner" }, "compaction (" + comp.kind + "): est. " + fmt(comp.est_tokens_before) + " → " + fmt(comp.est_tokens_after) + " tokens",
       comp.summary ? h("details", null, h("summary", null, "show summary"), h("pre", null, comp.summary)) : null));
@@ -252,9 +261,19 @@ function stepCard(s, prefix) {
       r ? h("div", { class: "result" + (r.is_error ? " err" : "") },
         h("details", null,
           h("summary", { class: "plain" }, (r.is_error ? "error: " : "") + clip(String(r.output).split("\n")[0], 140) + "  ", h("span", { class: "hint" },
-            secs(r.duration_s) + (r.approved === false ? " · denied" : "") + " · " + fmt(String(r.output).length) + " chars")),
+            secs(r.duration_s) + (r.approved === false ? " · denied" : "") + " · " + fmt(String(r.output).length) + " chars"),
+            r.parallel ? h("span", { class: "pill info", style: "margin-left:6px", title: "ran concurrently with the other read-only calls of this turn" }, "parallel ×" + r.parallel) : null,
+            r.permission ? h("span", { class: "pill " + (r.permission === "deny" ? "bad" : "info"), style: "margin-left:6px", title: "permission rule: " + r.rule }, "rule: " + r.permission) : null),
           h("pre", null, String(r.output)))) : h("div", { class: "hint" }, "(no result recorded)")));
   });
+  if (s.checkpoint) kids.push(h("div", { class: "hint" }, "checkpoint: workspace copied before these tools ran (" + s.checkpoint.files + " files" +
+    (s.checkpoint.skipped_large ? ", " + s.checkpoint.skipped_large + " too large to copy" : "") + (s.checkpoint.complete ? "" : ", INCOMPLETE") + ")"));
+  for (const sub of s.subs || []) {
+    kids.push(h("div", { class: "call" }, h("div", null, h("span", { class: "name" }, "sub-agent " + sub.name + " #" + sub.index), " ",
+      h("span", { class: "hint" }, sub.status + " · " + sub.steps + " steps · in " + fmt(sub.input_tokens) + " · out " + fmt(sub.output_tokens) +
+        " · its own trajectory is in " + sub.name + "-" + sub.index + "/")),
+      h("div", { class: "result" }, h("details", null, h("summary", { class: "plain" }, "Q: " + clip(sub.question, 140)), h("pre", null, sub.final_text || "(no answer)")))));
+  }
   return h("section", { class: "card step " + (c.finish === "length" ? "length" : c.finish === "stop" || c.finish === "end_turn" ? "stop" : ""), id: prefix + "-step-" + s.n }, kids);
 }
 function endBanner(run) {

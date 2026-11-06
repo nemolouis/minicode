@@ -92,8 +92,6 @@ def test_daily_quota_429_raises_without_waiting(monkeypatch):
 
 
 def test_short_server_delay_hint_is_used(monkeypatch):
-    import io
-    import urllib.error
     from miniagent import client as mod
 
     assert mod.suggested_delay("Please retry in 23.5s.") == 23.5
@@ -169,7 +167,6 @@ def _gemini_client(**kw):
 
 
 def test_gemini_base_url_gets_v1beta_and_header(monkeypatch):
-    import io
     from miniagent import client as mod
     assert _gemini_client().base_url == "http://relay.example/v1beta"
     assert ChatClient(api_key="k", base_url="http://r/v1beta", api_style="gemini").base_url == "http://r/v1beta"

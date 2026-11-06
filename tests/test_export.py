@@ -116,7 +116,7 @@ def test_old_trajectories_without_logged_system_resolve_by_hash(tmp_path):
     out = results(tmp_path, [(GOOD, 0)])
     traj = next(out.glob("trajectories/*/trajectory.jsonl"))
     ev = [json.loads(l) for l in traj.read_text().splitlines()]
-    ev[0].pop("system"); ev[0].pop("tool_specs")                                  # the format before this change
+    ev[0].pop("system"); ev[0].pop("tool_specs"); ev[0].pop("schema_version")   # the format before this change
     traj.write_text("".join(json.dumps(e) + "\n" for e in ev))
     export_sft([out], tmp_path / "sft.jsonl")
     (ex,) = rows(tmp_path / "sft.jsonl")

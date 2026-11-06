@@ -1,6 +1,5 @@
 """Harness tests with a scripted fake client (no network)."""
 import json
-import shutil
 from pathlib import Path
 
 import pytest
@@ -8,7 +7,7 @@ import pytest
 from miniagent.client import ModelResponse, ToolCall
 from miniagent.eval import grade, report
 from miniagent.eval.runner import run_one
-from miniagent.eval.tasks import Task, apply_split, freeze_split, load_tasks, task_hash
+from miniagent.eval.tasks import Task, apply_split, freeze_split, load_tasks
 
 
 def make_task(root: Path, name="t1", bug=True) -> Task:

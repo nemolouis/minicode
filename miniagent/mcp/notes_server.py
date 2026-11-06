@@ -20,7 +20,6 @@ import os
 import sys
 import time
 
-from . import safepath
 from .safepath import Denied, Scan, TooLarge, clean_text, make_policy, open_file, read_all, show, validate_rel
 
 SERVER_INFO = {"name": "miniagent-notes", "version": "0.1.0"}
@@ -223,7 +222,7 @@ class NotesServer:
             return self._result(str(e), True)
         except TooLarge as e:
             return self._result(f"note too large: {e}", True)
-        except Denied as e:                                            # same text whether it is missing or forbidden
+        except Denied:                                            # same text whether it is missing or forbidden
             return self._result(f"no such note, or not allowed: {show(args.get('path', args.get('subdir', '')))!r}. "
                                 "Use list_notes to see the available paths.", True)
 

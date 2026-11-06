@@ -28,3 +28,5 @@ data/sft_train_v1*
 docs/Agent 方向个人项目清单：中层与下层.md
 results/_logs/
 results/*WRONGTASKS*/
+.ruff_cache/
+.venv-sdk/

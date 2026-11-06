@@ -5,18 +5,19 @@ import hashlib
 import json
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Callable
 
+from . import compaction
 from .client import ModelResponse
+from .compaction import SUMMARY_PROMPT  # noqa: F401  (re-exported: it used to live here)
+from .executor import ToolExecutor
 from .features import FEATURES, explore_tool, render_todos, todo_tool, with_project_memory
-from .sandbox import SandboxError
-from . import session as sess
 from .permissions import Permissions
-from .schema import signature, validate
-from .tools import Tool, ToolError, Workspace, build_tools, glob_tool
-from .trajectory import Trajectory
+from .provenance import provenance
+from .session import Recorder
+from .tools import Tool, Workspace, build_tools, glob_tool
+from .trajectory import SCHEMA_VERSION, Trajectory
 
 SYSTEM_PROMPT = """You are a coding agent working inside a git-style repository. \
 Your job is to fix the bug or complete the task the user describes.
@@ -26,12 +27,6 @@ edit that fixes the root cause, then run the project's tests with bash to verify
 Do not edit tests to make them pass. Paths are relative to the workspace root, and bash already runs there: do not cd elsewhere. \
 When you are done, reply with a short summary of what you changed and the test result, \
 and make no further tool calls."""
-
-SUMMARY_PROMPT = """Below is the transcript of an agent working on a coding task. Write a \
-dense progress summary the agent can continue from: files inspected and what was learned, \
-edits made (file + what changed), commands run and their outcomes, current hypothesis, \
-and what remains. Do not invent anything."""
-
 
 @dataclass
 class RunResult:
@@ -95,6 +90,7 @@ class Agent:
         if "explore" in self.features:
             tools["explore"] = explore_tool(self)
         self.tools: dict[str, Tool] = {n: t for n, t in tools.items() if n not in self.disabled_tools}
+        self._recorder: Recorder | None = None             # set by run()
 
     def add_sub_usage(self, input_tokens: int, output_tokens: int) -> None:
         with self._usage_lock:
@@ -106,26 +102,20 @@ class Agent:
         """Run `task`. With `resume` (a state from miniagent.session.load_session) the earlier conversation is continued:
         `task` is added as a new user message and step numbers go on from where the session stopped."""
         base = resume["step"] if resume else 0
-        self._step_index: dict[int, int] = dict(resume["step_index"]) if resume else {}
-        self._todos_at: dict[int, list] = dict(resume["todos_at"]) if resume else {}
         if resume:
             messages: list[dict] = list(resume["messages"]) + [{"role": "user", "content": task}]
             self.todos = list(resume.get("todos", []))
         else:
             messages = [{"role": "user", "content": task}]
-        self._session_task = resume["task"] if resume else task
-        self.trajectory.log(
-            "run_resume" if resume else "run_start", task=task, model=self.model, meta=self.meta,
-            config={"max_steps": self.max_steps, "context_limit": self.context_limit,
-                    "keep_recent": self.keep_recent, "compact_regrowth": self.compact_regrowth, "max_tokens": self.max_tokens,
-                    "temperature": self.temperature, "tools": sorted(self.tools),
-                    **({"features": sorted(self.features)} if self.features else {}),
-                    **({"workspace_options": opts} if (opts := {k: True for k in ("require_read", "diagnostics")
-                                                                 if getattr(self.workspace, k, False)}) else {}),
-                    **({"permissions": self.permissions.to_dict()} if self.permissions else {}),
-                    "system_sha1": hashlib.sha1(self.system.encode()).hexdigest()[:12]},
-            # full text, so the exact model input can be rebuilt later (SFT export) without guessing from a hash
-            system=self.system, tool_specs=[t.spec() for t in self.tools.values()])
+        run_dir = self.trajectory.path.parent if (self.session and self.trajectory.path) else None
+        self._recorder = rec = Recorder(
+            run_dir, self.workspace.root, task=resume["task"] if resume else task, model=self.model,
+            system_sha1=self._system_sha1(), step_index=resume["step_index"] if resume else None,
+            todos_at=resume["todos_at"] if resume else None)
+        executor = ToolExecutor(self.tools, confirm=self.confirm, trajectory=self.trajectory, root=self.workspace.root,
+                                permissions=self.permissions, validate_args=self.validate_args, parallel=self.parallel_tools)
+        self._log_start(task, resume is not None)
+
         in_tok = out_tok = 0
         last_input = resume.get("last_input", 0) if resume else 0
         floor: int | None = None        # input tokens measured on the first request after the latest compaction
@@ -139,47 +129,30 @@ class Agent:
                     messages = self._compact(messages, trigger_tokens=last_input)
                     awaiting_floor = True
                     last_input = 0
-                    self._step_index.clear()          # the old positions no longer exist: only later steps can be rewound to
-                    self._todos_at.clear()
-                self._step_index[step] = len(messages)
-                self._todos_at[step] = [dict(t) for t in self.todos]
+                    rec.forget_positions()
+                rec.begin_step(step, len(messages), self.todos)
 
-                t0 = time.time()
-                resp: ModelResponse = self.client.chat(
-                    model=self.model, max_tokens=self.max_tokens, system=self.system,
-                    tools=[t.spec() for t in self.tools.values()], messages=messages,
-                    temperature=self.temperature,
-                )
-                calls = [_parse_call(c) for c in resp.tool_calls]
+                resp, calls = self._model_step(step, messages)
                 last_input = resp.usage["input_tokens"]
                 if awaiting_floor:
                     floor, awaiting_floor = last_input, False
-                    if floor >= self.context_limit * 0.7:
+                    if floor >= self.context_limit * compaction.TRIGGER_FRACTION:
                         self.trajectory.log("compaction_floor", step=step, input_tokens=floor,
-                                            threshold=int(self.context_limit * 0.7), next_trigger=int(self._compact_trigger(floor)),
+                                            threshold=int(self.context_limit * compaction.TRIGGER_FRACTION),
+                                            next_trigger=int(self._compact_trigger(floor)),
                                             note="compaction could not get below the threshold; next one waits for regrowth")
                 in_tok += last_input
                 out_tok += resp.usage["output_tokens"]
-                self.trajectory.log(
-                    "model_call", step=step, latency_s=round(time.time() - t0, 3),
-                    finish_reason=resp.finish_reason, text=resp.text, response_model=resp.model,
-                    # `extra` = provider fields echoed back in the history (Gemini thought signatures); kept so that a
-                    # replay rebuilds a history of the same size, which the compaction decisions depend on
-                    tool_calls=[{"id": c["id"], "name": c["name"], "input": c["input"], **({"extra": r.extra} if r.extra else {})}
-                                for c, r in zip(calls, resp.tool_calls)],
-                    usage=resp.usage,
-                    **({"reasoning": resp.reasoning} if self.log_reasoning and resp.reasoning else {}),
-                )
                 messages.append(_assistant_message(resp))
                 final_text = resp.text
 
                 if resp.tool_calls:
-                    self._checkpoint(step, calls)
-                    messages.extend(self._run_tools(step, calls))
-                    self._save_session(messages, step, last_input)
+                    rec.checkpoint(step, calls, self.tools, self.trajectory)
+                    messages.extend(executor.run(step, calls))
+                    rec.save(messages, step, last_input, self.todos)
                     continue
                 status = "done" if resp.finish_reason == "stop" else resp.finish_reason
-                self._save_session(messages, step, last_input)
+                rec.save(messages, step, last_input, self.todos)
                 break
         except Exception as e:  # API failure etc.; keep the trajectory consistent
             self.trajectory.log("run_end", status="error", steps=step, error=repr(e),
@@ -194,165 +167,52 @@ class Agent:
                                if self.sub_usage["input"] or self.sub_usage["output"] else {}))
         return RunResult(status, step, final_text, in_tok, out_tok)
 
-    # -------------------------------------------------------------- session
-    def _run_dir(self):
-        return self.trajectory.path.parent if (self.session and self.trajectory.path) else None
+    def _system_sha1(self) -> str:
+        return hashlib.sha1(self.system.encode()).hexdigest()[:12]
 
-    def _checkpoint(self, step: int, calls: list[dict]) -> None:
-        run_dir = self._run_dir()
-        if run_dir is None:
-            return
-        if all((t := self.tools.get(c["name"])) is not None and t.read_only for c in calls):
-            return                                 # nothing here can change files
-        info = sess.snapshot(self.workspace.root, run_dir / "checkpoints" / f"step-{step}",
-                             exclude=sess.exclusions(self.workspace.root, run_dir))
-        self.trajectory.log("checkpoint", step=step, **info)
+    def _log_start(self, task: str, resumed: bool) -> None:
+        opts = {k: True for k in ("require_read", "diagnostics") if getattr(self.workspace, k, False)}
+        self.trajectory.log(
+            "run_resume" if resumed else "run_start", schema_version=SCHEMA_VERSION, provenance=provenance(), task=task,
+            model=self.model, meta=self.meta,
+            config={"max_steps": self.max_steps, "context_limit": self.context_limit,
+                    "keep_recent": self.keep_recent, "compact_regrowth": self.compact_regrowth, "max_tokens": self.max_tokens,
+                    "temperature": self.temperature, "tools": sorted(self.tools),
+                    **({"features": sorted(self.features)} if self.features else {}),
+                    **({"workspace_options": opts} if opts else {}),
+                    **({"permissions": self.permissions.to_dict()} if self.permissions else {}),
+                    "system_sha1": self._system_sha1()},
+            # full text, so the exact model input can be rebuilt later (SFT export) without guessing from a hash
+            system=self.system, tool_specs=[t.spec() for t in self.tools.values()])
 
-    def _save_session(self, messages: list[dict], step: int, last_input: int) -> None:
-        run_dir = self._run_dir()
-        if run_dir is None:
-            return
-        sess.save_session(run_dir, {
-            "task": self._session_task, "model": self.model, "workspace": str(self.workspace.root),
-            "system_sha1": hashlib.sha1(self.system.encode()).hexdigest()[:12], "messages": messages, "step": step,
-            "step_index": self._step_index, "todos": self.todos, "todos_at": self._todos_at, "last_input": last_input})
-
-    # ---------------------------------------------------------------- tools
-    def _run_tools(self, step: int, calls: list[dict]) -> list[dict]:
-        """Run one turn's tool calls. Consecutive read-only calls run concurrently; anything else (writes, bash, calls
-        needing confirmation, bad calls) runs alone and in order, so it acts as a barrier. The results and the
-        `tool_result` log lines always come out in the order the model issued the calls."""
-        out: list[dict] = []
-        i = 0
-        while i < len(calls):
-            j = i
-            if self.parallel_tools:
-                while j < len(calls) and self._concurrent_ok(calls[j]):
-                    j += 1
-            if j - i >= 2:
-                batch = calls[i:j]
-                with ThreadPoolExecutor(max_workers=min(len(batch), 8)) as pool:
-                    futures = [pool.submit(self._execute, c) for c in batch]
-                    results = [f.result() for f in futures]           # SandboxError (infrastructure fault) re-raises here
-                for c, r in zip(batch, results):
-                    out.append(self._log_tool(step, c, r, parallel=len(batch)))
-                i = j
-            else:
-                out.append(self._run_tool(step, calls[i]))
-                i += 1
-        return out
-
-    def _concurrent_ok(self, call: dict) -> bool:
-        tool = self.tools.get(call["name"])
-        # a call with bad arguments may sit in the batch: _execute rejects it without running anything
-        return bool(tool and tool.read_only and not call.get("parse_error") and not self._needs_confirm(tool, call))
-
-    def _decision(self, call: dict):
-        from .permissions import Decision
-        if self.permissions is None or not isinstance(call.get("input"), dict):
-            return Decision("default")
-        return self.permissions.decide(call["name"], call["input"], self.workspace.root)
-
-    def _needs_confirm(self, tool: Tool, call: dict) -> bool:
-        action = self._decision(call).action
-        return True if action == "ask" else False if action == "allow" else tool.needs_confirm
-
-    def _arg_errors(self, tool: Tool, args: dict) -> list[str]:
-        return validate(args, tool.input_schema) if self.validate_args else []
-
-    def _run_tool(self, step: int, call: dict) -> dict:
-        return self._log_tool(step, call, self._execute(call))
-
-    def _execute(self, call: dict) -> dict:
-        """Run one call and return {output, is_error, approved, duration_s}. Does not log (safe to call from a worker thread
-        for read-only tools)."""
-        name, args = call["name"], call["input"]
+    def _model_step(self, step: int, messages: list[dict]) -> tuple[ModelResponse, list[dict]]:
+        """One model request; logs the `model_call` event. Returns the response and its parsed tool calls."""
         t0 = time.time()
-        approved, is_error = True, False
-        tool = self.tools.get(name)
-        if tool is None:
-            out, is_error = f"unknown tool: {name}", True
-        elif call.get("parse_error"):
-            out, is_error = f"error: arguments are not valid JSON ({call['parse_error']})", True
-        elif errs := self._arg_errors(tool, args):
-            out, is_error = f"error: invalid arguments for {name}: {'; '.join(errs)}. Expected {signature(tool.input_schema)}", True
-        elif (decision := self._decision(call)).action == "deny":
-            approved, is_error = False, True
-            out = f"denied by permission rule {decision.rule!r}; this action is not allowed, try a different approach"
-        else:
-            if self._needs_confirm(tool, call) and not self.confirm(name, args):
-                approved, is_error, out = False, True, "user denied this action; try a different approach or explain why it is needed"
-            else:
-                try:
-                    out = tool.func(args)
-                except ToolError as e:
-                    out, is_error = f"error: {e}", True
-                except SandboxError:
-                    raise          # infrastructure fault: ends the run as an error, is not shown to the model as a tool result
-                except (KeyError, TypeError, ValueError) as e:
-                    out, is_error = f"error: bad arguments ({e!r})", True
-                except Exception as e:  # tool bug must not kill the run
-                    out, is_error = f"error: {type(e).__name__}: {e}", True
-        res = {"output": out, "is_error": is_error, "approved": approved, "duration_s": round(time.time() - t0, 3)}
-        if self.permissions is not None and tool is not None and (d := self._decision(call)).action != "default":
-            res["permission"], res["rule"] = d.action, d.rule
-        return res
-
-    def _log_tool(self, step: int, call: dict, r: dict, parallel: int = 1) -> dict:
-        self.trajectory.log("tool_result", step=step, tool_call_id=call["id"], name=call["name"], input=call["input"],
-                            output=r["output"], is_error=r["is_error"], approved=r["approved"], duration_s=r["duration_s"],
-                            **({"parallel": parallel} if parallel > 1 else {}),
-                            **({"permission": r["permission"], "rule": r["rule"]} if "permission" in r else {}))
-        return {"role": "tool", "tool_call_id": call["id"], "content": r["output"]}
+        resp: ModelResponse = self.client.chat(
+            model=self.model, max_tokens=self.max_tokens, system=self.system,
+            tools=[t.spec() for t in self.tools.values()], messages=messages, temperature=self.temperature)
+        calls = [_parse_call(c) for c in resp.tool_calls]
+        self.trajectory.log(
+            "model_call", step=step, latency_s=round(time.time() - t0, 3),
+            finish_reason=resp.finish_reason, text=resp.text, response_model=resp.model,
+            # `extra` = provider fields echoed back in the history (Gemini thought signatures); kept so that a
+            # replay rebuilds a history of the same size, which the compaction decisions depend on
+            tool_calls=[{"id": c["id"], "name": c["name"], "input": c["input"], **({"extra": r.extra} if r.extra else {})}
+                        for c, r in zip(calls, resp.tool_calls)],
+            usage=resp.usage,
+            **({"reasoning": resp.reasoning} if self.log_reasoning and resp.reasoning else {}),
+        )
+        return resp, calls
 
     # ----------------------------------------------------------- compaction
     def _compact_trigger(self, floor: int | None) -> float:
-        """Input-token count above which the history is compacted."""
-        base = self.context_limit * 0.7
-        if floor is None or floor < base:        # no compaction yet, or the last one worked: original behaviour
-            return base
-        return floor * (1 + self.compact_regrowth)
+        return compaction.compact_trigger(self.context_limit, self.compact_regrowth, floor)
 
     def _compact(self, messages: list[dict], trigger_tokens: int | None = None) -> list[dict]:
-        before = _estimate_tokens(messages)
-        # Stage 1: elide old tool outputs (cheap, lossless for the structure).
-        cutoff = max(len(messages) - self.keep_recent, 1)
-        out = [m for m in messages]
-        for i in range(1, cutoff):
-            m = out[i]
-            if m["role"] == "tool" and len(m["content"]) > 200:
-                out[i] = {**m, "content": f"[elided {len(m['content'])} chars]"}
-        after = _estimate_tokens(out)
-        self.trajectory.log("compaction", kind="elide", est_tokens_before=before, est_tokens_after=after,
-                            trigger_input_tokens=trigger_tokens)
-        if after <= self.context_limit * 0.5:
-            return out
-
-        # Stage 2: summarise the middle. Tail must start at an assistant message so
-        # tool_calls/tool-result pairs stay intact and roles keep alternating.
-        i = max(len(out) - self.keep_recent, 1)
-        while i < len(out) and out[i]["role"] != "assistant":
-            i += 1
-        if i >= len(out) or i <= 1:
-            return out
-        transcript = _render(messages[1:i])  # un-elided: elision must not starve the summary
-        resp = self.client.chat(
-            model=self.model, max_tokens=1500, temperature=self.temperature,
-            messages=[{"role": "user", "content": f"{SUMMARY_PROMPT}\n\n<task>\n{out[0]['content']}\n</task>\n\n<transcript>\n{transcript}\n</transcript>"}],
-        )
-        summary = resp.text
-        if not summary.strip():
-            # An empty summary (e.g. a thinking model used the whole token budget) would silently delete the middle of the
-            # history. Keep it, only the elision of old tool outputs stands, and say so in the trajectory.
-            self.trajectory.log("compaction", kind="summary_failed", est_tokens_before=after, est_tokens_after=after,
-                                trigger_input_tokens=trigger_tokens, finish_reason=resp.finish_reason)
-            return out
         todo = f"\n\n[Current todo list]\n{render_todos(self.todos)}" if self.todos else ""
-        head = {"role": "user", "content": f"{out[0]['content']}\n\n[Progress so far, summarised from earlier steps]\n{summary}{todo}"}
-        new = [head] + out[i:]
-        self.trajectory.log("compaction", kind="summary", est_tokens_before=after,
-                            est_tokens_after=_estimate_tokens(new), summary=summary, trigger_input_tokens=trigger_tokens)
-        return new
+        return compaction.compact(messages, client=self.client, model=self.model, temperature=self.temperature,
+                                  context_limit=self.context_limit, keep_recent=self.keep_recent, trajectory=self.trajectory,
+                                  trigger_tokens=trigger_tokens, todo_note=todo)
 
 
 # ------------------------------------------------------------------ helpers
@@ -373,21 +233,3 @@ def _assistant_message(resp: ModelResponse) -> dict:
             {"id": c.id, "type": "function", "function": {"name": c.name, "arguments": c.arguments}, **c.extra}
             for c in resp.tool_calls]
     return msg
-
-
-def _estimate_tokens(messages: list[dict]) -> int:
-    return len(json.dumps(messages, ensure_ascii=False)) // 3
-
-
-def _render(messages: list[dict]) -> str:
-    parts = []
-    for m in messages:
-        if m["role"] == "tool":
-            parts.append(f"[result] {str(m['content'])[:500]}")
-            continue
-        if m.get("content"):
-            parts.append(f"[{m['role']}] {m['content']}")
-        for c in m.get("tool_calls") or []:
-            f = c["function"]
-            parts.append(f"[call {f['name']}] {f['arguments'][:500]}")
-    return "\n".join(parts)

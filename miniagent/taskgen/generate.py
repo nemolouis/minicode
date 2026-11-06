@@ -11,7 +11,7 @@ import tempfile
 import threading
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 from ..sandbox import Sandbox
@@ -239,7 +239,7 @@ def generate_seed(seed: Seed, out_root: Path, cfg: GenConfig) -> dict:
         for n, cand in enumerate(accepted):
             tid = f"g-{seed.name}-{n:03d}-{cand['mutant'].family}"
             d = out_root / tid
-            visible = _build_task(seed, cand, d, cfg, random.Random(f"{cfg.rng}:{seed.name}:{n}"), tests_src, all_keys)
+            _build_task(seed, cand, d, cfg, random.Random(f"{cfg.rng}:{seed.name}:{n}"), tests_src, all_keys)
             ok, why = _check_built(seed, d, cfg)
             if not ok:
                 shutil.rmtree(d)

@@ -98,7 +98,7 @@ def main(argv=None) -> int:
 
     run_dir = Path(args.resume) if args.resume else Path(args.runs_dir) / time.strftime("%Y%m%d-%H%M%S")
     servers = json.loads(Path(args.mcp_config).read_text()) if args.mcp_config else []
-    from .sandbox import Sandbox, SandboxError, available
+    from .sandbox import Sandbox, available
     if args.sandbox and not available():
         print("error: the sandbox image is missing or Docker is not running (build it with: miniagent-eval sandbox-build)", file=sys.stderr)
         return 2

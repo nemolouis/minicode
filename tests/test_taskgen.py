@@ -1,7 +1,6 @@
 """Task generator tests: the pure parts need nothing; the end-to-end ones need the Docker sandbox."""
 import ast
 import json
-import random
 import shutil
 from pathlib import Path
 

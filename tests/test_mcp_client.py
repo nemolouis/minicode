@@ -1,7 +1,5 @@
 """The MCP client against a real notes server and against misbehaving fake servers."""
-import json
 import os
-import signal
 import sys
 import textwrap
 import time

@@ -348,3 +348,21 @@ def test_rewind_refuses_an_incomplete_checkpoint(tmp_path, monkeypatch):
     with pytest.raises(ValueError, match="incomplete"):
         sess.rewind(tmp_path / "run", 1, w)
     assert (w / "a.txt").read_text() == "X"
+
+
+def test_session_is_saved_after_every_tool_turn_so_a_crash_loses_nothing(tmp_path):
+    (tmp_path / "f.txt").write_text("x")
+
+    class Boom(Script):
+        def chat(self, **kw):
+            if not self.script:
+                raise RuntimeError("API down")
+            return super().chat(**kw)
+
+    a = Agent(Boom([([call("1", "read_file", path="f.txt")], 10), ([call("2", "grep", pattern="x")], 10)]), "fake", Workspace(tmp_path),
+              trajectory=Trajectory(tmp_path / "run"), session=True)
+    assert a.run("t").status == "error"                              # the third request failed
+    st = sess.load_session(tmp_path / "run")
+    assert st["step"] == 2 and st["messages"][-1]["role"] == "tool"  # state as of the last completed step
+    b = Agent(Script([(["recovered"], 10)]), "fake", Workspace(tmp_path), trajectory=Trajectory(tmp_path / "run"), session=True)
+    assert b.run("continue", resume=st).status == "done"

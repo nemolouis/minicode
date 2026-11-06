@@ -1,6 +1,5 @@
 """MCP tools inside the agent loop: exposure, confirmation, and what a steered model can and cannot reach."""
 import json
-import os
 import sys
 
 import pytest

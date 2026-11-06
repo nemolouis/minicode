@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import time
 from pathlib import Path
 
 from .tools import SKIP_DIRS
@@ -161,4 +162,47 @@ def rewind(run_dir: str | Path, step: int, workspace: str | Path) -> dict:
     state["todos_at"] = {k: v for k, v in state["todos_at"].items() if k < step}
     state["last_input"] = 0
     save_session(run_dir, state)
+    traj = run_dir / "trajectory.jsonl"
+    if traj.exists():                                   # make the log say that what follows replaces what came before
+        with traj.open("a", encoding="utf-8") as f:
+            f.write(json.dumps({"ts": round(time.time(), 3), "event": "rewind", "to_step": step, "restored": result["restored"],
+                                "removed": result["removed"]}) + "\n")
     return {"step": step, **result, "messages": len(state["messages"])}
+
+
+class Recorder:
+    """What the agent loop keeps for a resumable session: the message-list length at the start of every step, the todo list at
+    that moment, and the writes of session.json / checkpoints. A no-op unless `run_dir` is given."""
+
+    def __init__(self, run_dir: Path | None, workspace: Path, *, task: str, model: str, system_sha1: str,
+                 step_index: dict | None = None, todos_at: dict | None = None):
+        self.run_dir, self.workspace = run_dir, workspace
+        self.task, self.model, self.system_sha1 = task, model, system_sha1
+        self.step_index: dict[int, int] = dict(step_index or {})
+        self.todos_at: dict[int, list] = dict(todos_at or {})
+
+    def forget_positions(self) -> None:
+        """A compaction rewrote the history: earlier positions no longer exist, only later steps can be rewound to."""
+        self.step_index.clear()
+        self.todos_at.clear()
+
+    def begin_step(self, step: int, n_messages: int, todos: list[dict]) -> None:
+        self.step_index[step] = n_messages
+        self.todos_at[step] = [dict(t) for t in todos]
+
+    def checkpoint(self, step: int, calls: list[dict], tools: dict, trajectory) -> None:
+        """Copy the workspace before tools that may change files run (nothing is copied before read-only turns)."""
+        if self.run_dir is None:
+            return
+        if all((t := tools.get(c["name"])) is not None and t.read_only for c in calls):
+            return
+        info = snapshot(self.workspace, self.run_dir / "checkpoints" / f"step-{step}", exclude=exclusions(self.workspace, self.run_dir))
+        trajectory.log("checkpoint", step=step, **info)
+
+    def save(self, messages: list[dict], step: int, last_input: int, todos: list[dict]) -> None:
+        if self.run_dir is None:
+            return
+        save_session(self.run_dir, {
+            "task": self.task, "model": self.model, "workspace": str(self.workspace), "system_sha1": self.system_sha1,
+            "messages": messages, "step": step, "step_index": self.step_index, "todos": todos, "todos_at": self.todos_at,
+            "last_input": last_input})

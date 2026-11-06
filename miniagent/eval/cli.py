@@ -12,6 +12,8 @@ from pathlib import Path
 
 from .grade import add_hidden, copy_repo, run_tests
 from .report import (compare, load_records, markdown_compare, markdown_report, summarize)
+from ..provenance import provenance
+from .config import load_config
 from .runner import config_hash, run_one
 from .tasks import apply_split, freeze_split, load_tasks
 
@@ -60,7 +62,8 @@ def cmd_split(a):
 
 def cmd_verify(a):
     """Each task must fail as shipped and pass (twice, to catch flakiness) with its reference solution."""
-    import shutil, tempfile
+    import shutil
+    import tempfile
 
     def check(t):
         if not t.solution.exists():
@@ -147,7 +150,10 @@ def cmd_run(a):
     else:
         if not a.config:
             raise SystemExit("error: --config is required (or --resume <results dir>)")
-        cfg = json.loads(Path(a.config).read_text())
+        try:
+            cfg = load_config(a.config)
+        except ValueError as e:
+            raise SystemExit(f"error: invalid config {e}")
         if a.sandbox:
             cfg["sandbox"] = True
     tasks = apply_split(load_tasks(a.tasks_root), Path(a.tasks_root) / "SPLIT.json")
@@ -219,7 +225,7 @@ def cmd_run(a):
         out.mkdir(parents=True, exist_ok=False)
         repeat = a.repeat
         done = set()
-        meta = {"run_id": run_id, "config": cfg, "config_hash": config_hash(cfg), "split": a.split,
+        meta = {"run_id": run_id, "config": cfg, "config_hash": config_hash(cfg), "provenance": provenance(), "split": a.split,
                 "repeat": a.repeat, "date": time.strftime("%Y-%m-%d %H:%M:%S"),
                 "tasks": [t.id for t in tasks], "task_hashes": {t.id: t.hash for t in tasks}}
         (out / "meta.json").write_text(json.dumps(meta, indent=2, ensure_ascii=False))
@@ -283,6 +289,29 @@ def cmd_report(a):
 def cmd_view(a):
     from .view import serve
     return serve([Path(d) for d in a.dirs], a.port, not a.no_open)
+
+
+def cmd_check(a):
+    """Validate trajectories against the documented schema (miniagent.trajectory); exit 1 if any is invalid."""
+    from ..trajectory import read_events, validate_events
+    from .replay import collect
+    paths = collect(a.paths)
+    if not paths:
+        raise SystemExit("no trajectory.jsonl found")
+    bad = legacy = 0
+    for p in paths:
+        try:
+            events = read_events(p)
+        except (OSError, ValueError) as e:
+            errs = [f"unreadable: {e}"]
+        else:
+            errs = validate_events(events)
+            legacy += bool(events) and "schema_version" not in events[0]
+        if errs:
+            bad += 1
+            print(f"{p}:\n  - " + "\n  - ".join(errs[:10]) + (f"\n  ... and {len(errs) - 10} more" if len(errs) > 10 else ""))
+    print(f"{len(paths) - bad}/{len(paths)} valid ({legacy} older trajectories without schema_version were checked only loosely)")
+    return 1 if bad else 0
 
 
 def cmd_replay(a):
@@ -377,6 +406,9 @@ def main(argv=None) -> int:
     v.add_argument("--port", type=int, default=8765)
     v.add_argument("--no-open", action="store_true")
     v.set_defaults(fn=cmd_view)
+    ck = sub.add_parser("check-trajectories", help="validate trajectories against the documented event schema")
+    ck.add_argument("paths", nargs="+", help="trajectory.jsonl files or directories containing them")
+    ck.set_defaults(fn=cmd_check)
     rp = sub.add_parser("replay", help="replay recorded trajectories through the current loop and report differences")
     rp.add_argument("paths", nargs="+", help="trajectory.jsonl files or directories containing them")
     rp.add_argument("--verbose", action="store_true", help="also list the identical ones")

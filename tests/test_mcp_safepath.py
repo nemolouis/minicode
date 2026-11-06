@@ -7,7 +7,7 @@ import threading
 import pytest
 
 from miniagent.mcp import safepath
-from miniagent.mcp.safepath import Denied, Scan, TooLarge, clean_text, make_policy, open_dir, open_file, read_all, validate_rel
+from miniagent.mcp.safepath import Denied, Scan, TooLarge, clean_text, make_policy, open_file, read_all, validate_rel
 
 
 @pytest.fixture
@@ -186,7 +186,7 @@ def test_scan_lists_only_real_notes_sorted(box):
 def test_scan_with_open_files_gives_closable_fds(box):
     p, _, _ = box
     seen = {}
-    for rel, fd, size in Scan(p, [], open_files=True):
+    for rel, fd, _size in Scan(p, [], open_files=True):
         try:
             seen[rel] = read_all(fd, 1000)
         finally:

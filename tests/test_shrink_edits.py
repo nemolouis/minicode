@@ -44,7 +44,7 @@ def test_cannot_shrink_below_original():
 def test_the_equality_check_catches_a_non_unique_snippet():
     # what the script's check compares: a non-unique shrink would NOT reproduce the teacher's edit
     old, new = "def g(x):\n    if x > 1:", "def g(x):\n    if x >= 1:"
-    bad_o, bad_n = "    if x > 1:", "    if x >= 1:"
+    bad_o = "    if x > 1:"
     assert T.count(bad_o) == 2
     o, n = se.shrink(T, old, new)
     assert T.count(o) == 1 and o != bad_o

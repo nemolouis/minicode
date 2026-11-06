@@ -6,7 +6,7 @@ requires-python = ">=3.10"
 dependencies = []
 
 [project.optional-dependencies]
-dev = ["pytest>=8"]
+dev = ["pytest>=8", "ruff>=0.5", "httpx>=0.27"]   # httpx: FastAPI TestClient for tests/test_server.py
 serve = ["fastapi>=0.110", "uvicorn>=0.30"]   # optional HTTP service (miniagent-serve); the agent itself needs nothing
 
 [project.scripts]
@@ -26,3 +26,21 @@ packages = ["miniagent", "miniagent.eval", "miniagent.mcp", "miniagent.taskgen"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 160
+target-version = "py310"
+extend-exclude = ["gen_tasks", "seeds", "tasks", "models", "adapters", ".venv", ".venv-mlx", ".venv-sdk"]
+
+[tool.ruff.lint]
+# pyflakes + pycodestyle errors (E/W) + the bug-prone parts of bugbear + import sorting is left alone on purpose
+select = ["E", "F", "W", "B"]
+ignore = [
+    "E701", "E702", "E731",   # one-line `if x: y`, `a; b` and lambda assignment are used on purpose in the tests and the viewer glue
+    "E741",                   # short loop names like `l` in line iterations
+    "B008", "B904", "B905",  # function-call defaults, `raise ... from`, zip(strict=) are not worth the churn here
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["B011", "B017", "E501"]
+"scripts/*" = ["E501"]
