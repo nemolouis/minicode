@@ -7,6 +7,7 @@ the model can recover instead of the run crashing.
 from __future__ import annotations
 
 import difflib
+import json
 import os
 import re
 from dataclasses import dataclass
@@ -46,12 +47,19 @@ class Tool:
 
 
 class Workspace:
-    def __init__(self, root: str | Path, sandbox=None, edit_hints: bool = False):
+    def __init__(self, root: str | Path, sandbox=None, edit_hints: bool = False, require_read: bool = False,
+                 diagnostics: bool = False):
         """`sandbox`: a miniagent.sandbox.Sandbox over `root`. With it, `bash` runs in the container instead of the host.
-        `edit_hints`: edit_file failures also show the closest real lines / file names, so the model can retry."""
+        `edit_hints`: edit_file failures also show the closest real lines / file names, so the model can retry.
+        `require_read`: edit_file refuses an existing file this run has not read (or written) with read_file/write_file:
+        an old_string written from memory is almost always wrong.
+        `diagnostics`: after write_file / edit_file on a .py or .json file, append a warning if the result does not parse."""
         self.root = Path(root).resolve()
         self.sandbox = sandbox
         self.edit_hints = edit_hints
+        self.require_read = require_read
+        self.diagnostics = diagnostics
+        self.seen: set[Path] = set()        # files the model has read or written in this run (resolved paths)
         if not self.root.is_dir():
             raise ValueError(f"workspace is not a directory: {self.root}")
 
@@ -72,6 +80,7 @@ class Workspace:
             lines = p.read_text(encoding="utf-8").splitlines()
         except UnicodeDecodeError:
             raise ToolError("file is not valid UTF-8 text")
+        self.seen.add(p)
         chunk = lines[offset - 1 : offset - 1 + limit]
         out = "\n".join(f"{i:>6}\t{l}" for i, l in enumerate(chunk, start=offset))
         if offset - 1 + limit < len(lines):
@@ -82,12 +91,16 @@ class Workspace:
         p = self.resolve(args["path"])
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(args["content"], encoding="utf-8")
-        return f"wrote {len(args['content'])} chars to {args['path']}"
+        self.seen.add(p)
+        return f"wrote {len(args['content'])} chars to {args['path']}" + self._diagnose(p, args["content"])
 
     def edit_file(self, args: dict) -> str:
         p = self.resolve(args["path"])
         if not p.is_file():
             raise ToolError(f"not a file: {args['path']}" + (self._similar_files(p) if self.edit_hints else ""))
+        if self.require_read and p not in self.seen:
+            raise ToolError(f"you have not read {args['path']} in this session: call read_file on it first, then copy old_string "
+                            "from the output")
         old, new = args["old_string"], args["new_string"]
         if old == new:
             raise ToolError("old_string and new_string are identical" + (
@@ -103,8 +116,24 @@ class Workspace:
                 lines = [text.count("\n", 0, m.start()) + 1 for m in re.finditer(re.escape(old), text)]
                 where = f" (at lines {', '.join(map(str, lines[:8]))})"
             raise ToolError(f"old_string matches {n} places{where}; include more context to make it unique")
-        p.write_text(text.replace(old, new, 1), encoding="utf-8")
-        return f"edited {args['path']}"
+        updated = text.replace(old, new, 1)
+        p.write_text(updated, encoding="utf-8")
+        return f"edited {args['path']}" + self._diagnose(p, updated)
+
+    def _diagnose(self, p: Path, text: str) -> str:
+        """A one-line warning when a Python/JSON file the model just wrote does not parse. Compiles only, never runs the code."""
+        if not self.diagnostics:
+            return ""
+        try:
+            if p.suffix == ".py":
+                compile(text, str(p.name), "exec")
+            elif p.suffix == ".json":
+                json.loads(text)
+        except SyntaxError as e:
+            return f"\nwarning: {p.name} no longer parses: {e.msg} (line {e.lineno}). Fix it before running anything."
+        except ValueError as e:                                           # json.JSONDecodeError, null bytes in source
+            return f"\nwarning: {p.name} no longer parses: {e}. Fix it before running anything."
+        return ""
 
     def _similar_files(self, p: Path) -> str:
         d = p.parent if p.parent.is_dir() else self.root

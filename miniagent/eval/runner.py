@@ -11,6 +11,7 @@ from pathlib import Path
 
 from ..agent import SYSTEM_PROMPT, Agent
 from ..mcp.client import mcp_session
+from ..permissions import Permissions
 from ..sandbox import Sandbox, SandboxError
 from ..tools import Workspace
 from ..trajectory import Trajectory
@@ -54,7 +55,9 @@ def _run_one(task: Task, cfg: dict, repeat: int, out_dir: Path, client, keep_wor
         use_sandbox = bool(cfg.get("sandbox", False))
         with mcp_session(cfg.get("mcp_servers", [])) as mcp_tools, (Sandbox(work) if use_sandbox else nullcontext()) as sb:
             agent = Agent(
-                client=client, model=cfg["model"], workspace=Workspace(work, sandbox=sb, edit_hints=bool(cfg.get("edit_hints", False))),
+                client=client, model=cfg["model"], workspace=Workspace(work, sandbox=sb, edit_hints=bool(cfg.get("edit_hints", False)),
+                                    require_read=bool(cfg.get("require_read", False)), diagnostics=bool(cfg.get("diagnostics", False))),
+                permissions=Permissions.from_dict(cfg.get("permissions")),
                 trajectory=Trajectory(traj_dir), max_steps=cfg.get("max_steps", 30),
                 max_tokens=cfg.get("max_tokens", 4096), context_limit=cfg.get("context_limit", 100_000),
                 keep_recent=cfg.get("keep_recent", 8), compact_regrowth=cfg.get("compact_regrowth", 1.0), system=system,

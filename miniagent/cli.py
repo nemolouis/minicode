@@ -7,6 +7,7 @@ from pathlib import Path
 import json
 
 from .agent import Agent
+from .permissions import Permissions
 from .mcp.client import mcp_session
 from .client import APIError, ChatClient
 from .tools import Workspace
@@ -33,7 +34,7 @@ def _make_confirm(auto: bool):
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="miniagent")
-    ap.add_argument("task", help="what the agent should do")
+    ap.add_argument("task", nargs="?", help="what the agent should do (with --resume: the follow-up instruction)")
     ap.add_argument("-w", "--workspace", default=".", help="repo root the agent may touch")
     ap.add_argument("-m", "--model", default=DEFAULT_MODEL)
     ap.add_argument("--max-steps", type=int, default=30)
@@ -47,11 +48,47 @@ def main(argv=None) -> int:
     ap.add_argument("--mcp-config", help="JSON file with a list of MCP servers: [{name, command, allow, trusted?}]")
     ap.add_argument("--disable-tools", default="", help="comma-separated built-in tools to hide, e.g. bash,grep,read_file")
     ap.add_argument("--features", default="", help="comma-separated opt-in features: memory (AGENTS.md), todo, explore (read-only sub-agent), glob")
+    ap.add_argument("--permissions", help="JSON file with allow / ask / deny rules, e.g. {\"deny\": [\"bash(curl*)\"], \"allow\": [\"bash(pytest*)\"]}")
+    ap.add_argument("--require-read", action="store_true", help="edit_file refuses files the agent has not read in this session")
+    ap.add_argument("--diagnostics", action="store_true", help="warn when a .py/.json file the agent just wrote no longer parses")
+    ap.add_argument("--resume", metavar="RUN_DIR", help="continue the session saved in this run directory (task = follow-up instruction)")
+    ap.add_argument("--rewind", metavar="RUN_DIR", help="put the workspace and the conversation back to the start of --to-step, then exit")
+    ap.add_argument("--to-step", type=int, help="step to rewind to (with --rewind)")
+    ap.add_argument("--no-session", action="store_true", help="do not save session.json / workspace checkpoints")
     ap.add_argument("--no-parallel", action="store_true", help="run tool calls one at a time")
     ap.add_argument("--no-validate", action="store_true", help="do not check tool arguments against their schemas")
     ap.add_argument("--sandbox", action="store_true", help="run bash in a Docker container (no network, read-only root, only the workspace mounted)")
     ap.add_argument("--runs-dir", default="runs")
     args = ap.parse_args(argv)
+
+    if args.rewind:
+        from .session import rewind
+        if args.to_step is None:
+            ap.error("--rewind needs --to-step N")
+        try:
+            print(rewind(args.rewind, args.to_step, args.workspace))
+        except (ValueError, FileNotFoundError) as e:
+            print(f"error: {e}", file=sys.stderr)
+            return 2
+        return 0
+    if not args.task:
+        ap.error("a task is required (except with --rewind)")
+    resume = None
+    if args.resume:
+        from .session import load_session
+        try:
+            resume = load_session(args.resume)
+        except (ValueError, FileNotFoundError) as e:
+            print(f"error: {e}", file=sys.stderr)
+            return 2
+        if Path(resume["workspace"]).resolve() != Path(args.workspace).resolve():
+            print(f"error: the session ran in {resume['workspace']}; pass that directory with -w", file=sys.stderr)
+            return 2
+    try:
+        permissions = Permissions.from_dict(json.loads(Path(args.permissions).read_text())) if args.permissions else None
+    except (OSError, ValueError) as e:
+        print(f"error: permissions: {e}", file=sys.stderr)
+        return 2
 
     try:
         client = ChatClient()
@@ -59,7 +96,7 @@ def main(argv=None) -> int:
         print(f"error: {e}", file=sys.stderr)
         return 2
 
-    run_dir = Path(args.runs_dir) / time.strftime("%Y%m%d-%H%M%S")
+    run_dir = Path(args.resume) if args.resume else Path(args.runs_dir) / time.strftime("%Y%m%d-%H%M%S")
     servers = json.loads(Path(args.mcp_config).read_text()) if args.mcp_config else []
     from .sandbox import Sandbox, SandboxError, available
     if args.sandbox and not available():
@@ -67,15 +104,15 @@ def main(argv=None) -> int:
         return 2
     with mcp_session(servers) as mcp_tools, (Sandbox(args.workspace) if args.sandbox else nullcontext()) as sb:
         agent = Agent(
-            client=client, model=args.model, workspace=Workspace(args.workspace, sandbox=sb),
+            client=client, model=args.model, workspace=Workspace(args.workspace, sandbox=sb, require_read=args.require_read, diagnostics=args.diagnostics),
             confirm=_make_confirm(args.yes), trajectory=Trajectory(run_dir), max_steps=args.max_steps,
             context_limit=args.context_limit, keep_recent=args.keep_recent, compact_regrowth=args.compact_regrowth,
             temperature=args.temperature, extra_tools=mcp_tools,
             features=tuple(f for f in args.features.split(",") if f), parallel_tools=not args.no_parallel,
-            validate_args=not args.no_validate,
+            validate_args=not args.no_validate, permissions=permissions, session=not args.no_session,
             disabled_tools=tuple(t for t in args.disable_tools.split(",") if t),
         )
-        res = agent.run(args.task)
+        res = agent.run(args.task, resume=resume)
     print(f"\n=== {res.status} | {res.steps} steps | {res.input_tokens} in / {res.output_tokens} out tokens ===")
     print(res.final_text)
     print(f"trajectory: {run_dir / 'trajectory.jsonl'}")

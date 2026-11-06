@@ -16,6 +16,9 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.error
+import urllib.parse
+import urllib.request
 from collections import deque
 from contextlib import contextmanager
 
@@ -39,6 +42,10 @@ class McpRpcError(McpError):
 
 class McpTimeout(McpError):
     pass
+
+
+class McpProbeFailed(McpTimeout):
+    """The modern-protocol probe got no usable answer (HTTP error, not JSON-RPC): fall back to the legacy handshake."""
 
 
 def _kill_group(proc: subprocess.Popen, sig: int) -> None:
@@ -216,6 +223,166 @@ class McpClient:
         return "\n".join(parts), bool(result.get("isError"))
 
 
+# ---------------------------------------------------------------------- Streamable HTTP transport
+MAX_HTTP_RESPONSE = 5_000_000
+_LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *a, **kw):
+        return None                                    # a redirect could carry the bearer token to another host: never follow
+
+
+class McpHttpClient(McpClient):
+    """MCP over Streamable HTTP: every JSON-RPC message is a POST; the reply is a JSON body or a text/event-stream containing the
+    reply. Same interface as the stdio client (initialize / list_tools / call_tool / close), so the agent glue is shared.
+
+    Safety: only https, or http to localhost (a bearer token over plain http to a remote host is refused); redirects are not
+    followed; the reply size is capped; the token goes only to the configured URL; the server never sees our environment.
+    """
+
+    def __init__(self, url: str, *, bearer_token: str | None = None, timeout: float = 20.0, allow_insecure: bool = False):
+        u = urllib.parse.urlsplit(url)
+        if u.scheme not in ("http", "https") or not u.hostname:
+            raise ValueError(f"MCP url must be http(s)://host/path, got {url!r}")
+        if u.scheme == "http" and u.hostname not in _LOCAL_HOSTS and not allow_insecure:
+            raise ValueError("plain http is only allowed for localhost; use https (or set allow_insecure for a trusted network)")
+        super().__init__([], timeout=timeout)
+        self.url, self.token = url, bearer_token
+        self.session_id: str | None = None
+        self._opener = urllib.request.build_opener(_NoRedirect)
+        self._started = False
+
+    def start(self) -> None:
+        self._started = True
+
+    @property
+    def alive(self) -> bool:
+        return self._started
+
+    def close(self) -> None:
+        if self._started and self.session_id:
+            try:
+                self._post(None, method="DELETE", timeout=3.0)
+            except Exception:
+                pass
+        self._started = False
+
+    def _headers(self) -> dict:
+        h = {"Content-Type": "application/json", "Accept": "application/json, text/event-stream",
+             "User-Agent": f"{CLIENT_INFO['name']}/{CLIENT_INFO['version']}"}
+        if self.era:
+            h["MCP-Protocol-Version"] = MODERN_VERSION if self.era == "modern" else LEGACY_VERSION
+        if self.session_id:
+            h["Mcp-Session-Id"] = self.session_id
+        if self.token:
+            h["Authorization"] = f"Bearer {self.token}"
+        return h
+
+    def _post(self, msg: dict | None, *, method: str = "POST", timeout: float, extra_headers: dict | None = None):
+        data = json.dumps(msg, separators=(",", ":")).encode() if msg is not None else None
+        req = urllib.request.Request(self.url, data=data, headers={**self._headers(), **(extra_headers or {})}, method=method)
+        return self._opener.open(req, timeout=timeout)
+
+    def _send(self, msg: dict) -> None:                 # notifications: the server answers 202 with no body
+        try:
+            with self._post(msg, timeout=self.timeout) as r:
+                r.read(MAX_HTTP_RESPONSE)
+        except (urllib.error.URLError, OSError, ValueError) as e:
+            raise McpError(f"could not send to the MCP server: {e}")
+
+    def request(self, method: str, params: dict | None = None, timeout: float | None = None, *, modern: bool | None = None) -> dict:
+        use_meta = (self.era == "modern") if modern is None else modern
+        params = dict(params or {})
+        if use_meta:
+            params["_meta"] = self._meta()
+        with self._id_lock:
+            self._next_id += 1
+            rid = self._next_id
+        limit = timeout or self.timeout
+        extra = {}
+        if use_meta:         # the modern HTTP binding repeats the method (and the tool/prompt name) in headers; servers check them
+            extra["MCP-Protocol-Version"] = MODERN_VERSION      # also on the discovery probe, before the era is known
+            extra["Mcp-Method"] = method
+            if method in ("tools/call", "prompts/get") and isinstance(params.get("name"), str):
+                extra["Mcp-Name"] = params["name"]
+        try:
+            r = self._post({"jsonrpc": "2.0", "id": rid, "method": method, "params": params}, timeout=limit, extra_headers=extra)
+        except urllib.error.HTTPError as e:
+            body = e.read(MAX_HTTP_RESPONSE).decode("utf-8", "replace")
+            try:
+                resp = json.loads(body)                     # a JSON-RPC error carried by a 4xx/5xx is still an answer
+                if isinstance(resp, dict) and "error" in resp:
+                    return self._unwrap(resp)
+            except ValueError:
+                pass
+            if modern:
+                raise McpProbeFailed(f"{method}: HTTP {e.code}")
+            raise McpError(f"{method}: HTTP {e.code}")
+        except (urllib.error.URLError, TimeoutError, OSError) as e:
+            if "timed out" in str(e):
+                raise McpTimeout(f"{method} timed out after {limit:.0f}s")
+            raise McpError(f"{method}: {e}")
+        with r:
+            sid = r.headers.get("Mcp-Session-Id")
+            if sid and not self.session_id and re.fullmatch(r"[\x21-\x7e]{1,256}", sid):
+                self.session_id = sid
+            ctype = (r.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+            try:
+                if ctype == "text/event-stream":
+                    resp = self._read_sse(r, rid, limit)
+                elif ctype == "application/json":
+                    raw = r.read(MAX_HTTP_RESPONSE + 1)
+                    if len(raw) > MAX_HTTP_RESPONSE:
+                        raise McpError("reply too large")
+                    resp = json.loads(raw.decode("utf-8", "replace"))
+                else:
+                    raise McpProbeFailed(f"{method}: unexpected content type {ctype!r}") if modern else \
+                        McpError(f"{method}: unexpected content type {ctype!r}")
+            except (TimeoutError, OSError) as e:
+                raise McpTimeout(f"{method} timed out after {limit:.0f}s") if "timed out" in str(e) else McpError(f"{method}: {e}")
+            except ValueError as e:
+                raise McpError(f"{method}: malformed reply ({e})")
+        if not isinstance(resp, dict) or resp.get("id") != rid:
+            raise McpError(f"{method}: reply does not match the request")
+        return self._unwrap(resp)
+
+    def _read_sse(self, r, rid: int, limit: float) -> dict:
+        """Read events until the one answering `rid`. Other events (progress, server requests) are ignored."""
+        deadline, got, data = time.time() + limit, 0, []
+        while time.time() < deadline:
+            line = r.readline(MAX_HTTP_RESPONSE)
+            if not line:
+                break
+            got += len(line)
+            if got > MAX_HTTP_RESPONSE:
+                raise McpError("reply too large")
+            line = line.decode("utf-8", "replace").rstrip("\r\n")
+            if line.startswith("data:"):
+                data.append(line[5:].lstrip(" "))
+            elif line == "" and data:
+                try:
+                    msg = json.loads("\n".join(data))
+                except ValueError:
+                    msg = None
+                data = []
+                if isinstance(msg, dict) and msg.get("id") == rid and ("result" in msg or "error" in msg):
+                    return msg
+        raise McpTimeout("event stream ended without a reply" if time.time() < deadline else f"no reply within {limit:.0f}s")
+
+    @staticmethod
+    def _unwrap(resp: dict) -> dict:
+        if "error" in resp:
+            e = resp["error"] if isinstance(resp["error"], dict) else {}
+            raise McpRpcError(e.get("code", -32603), str(e.get("message", "error")), e.get("data"))
+        result = resp.get("result")
+        if not isinstance(result, dict):
+            raise McpError("malformed result")
+        if result.get("resultType", "complete") != "complete":
+            raise McpError(f"unsupported resultType {result.get('resultType')!r}")
+        return result
+
+
 # ---------------------------------------------------------------------- glue for the agent
 _CTRL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
 _NAME_BAD = re.compile(r"[^A-Za-z0-9_-]")
@@ -262,7 +429,8 @@ def mcp_tools_for(client: McpClient, server: str, allow: list[str], trusted: lis
 def mcp_session(configs: list[dict]):
     """Start the configured MCP servers, yield their tools (name -> Tool), and always shut them down.
 
-    Each config: {"name", "command": [...], "allow": [tool names], "trusted": [...], "timeout": seconds}.
+    Each config: {"name", "command": [...] | "url": "https://...", "allow": [tool names], "trusted": [...], "timeout": seconds}.
+    A `url` server speaks Streamable HTTP; its bearer token (if any) is read from the environment variable named by `auth_env`.
     """
     clients: list[McpClient] = []
     try:
@@ -270,7 +438,18 @@ def mcp_session(configs: list[dict]):
         for cfg in configs or []:
             if not cfg.get("allow"):
                 raise ValueError(f"MCP server {cfg.get('name')!r} needs an explicit non-empty 'allow' list")
-            c = McpClient(resolve_command(cfg["command"]), timeout=cfg.get("timeout", 20.0))
+            if ("command" in cfg) == ("url" in cfg):
+                raise ValueError(f"MCP server {cfg.get('name')!r} needs exactly one of 'command' (stdio) or 'url' (HTTP)")
+            if "url" in cfg:
+                token = None
+                if cfg.get("auth_env"):
+                    token = os.environ.get(cfg["auth_env"])
+                    if not token:
+                        raise ValueError(f"MCP server {cfg.get('name')!r}: environment variable {cfg['auth_env']} is not set")
+                c = McpHttpClient(cfg["url"], bearer_token=token, timeout=cfg.get("timeout", 20.0),
+                                  allow_insecure=bool(cfg.get("allow_insecure", False)))
+            else:
+                c = McpClient(resolve_command(cfg["command"]), timeout=cfg.get("timeout", 20.0))
             clients.append(c)
             c.start()
             c.initialize()

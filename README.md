@@ -17,10 +17,10 @@
 
 | 部分 | 状态 | 说明 |
 |---|---|---|
-| M1 agent 主循环与工具 | 完成 | 见"特性"；全仓库 410 个测试（不调用模型；需要 Docker 的测试在没有 Docker 时自动跳过，当前环境 377 通过、33 跳过） |
+| M1 agent 主循环与工具 | 完成 | 见"特性"；全仓库 450 个测试（不调用模型；需要 Docker 的测试在没有 Docker 时自动跳过，当前环境 417 通过、33 跳过） |
 | M2 评测 harness | 完成 | 任务集、dev/test 划分、隐藏测试、规则化判分、配对对比、断点续跑；实验结果见"结果"；test 集未跑 |
 | M3 轨迹回放 | 完成 | `miniagent-eval view`：浏览所有运行、逐步回放、两次运行并排对比；未做按条件导出轨迹 |
-| M4 MCP server | 完成 | 手写的 MCP 笔记服务器 + 客户端 + 越界/越权测试（见"MCP 服务器"）；未用官方客户端做互操作验证 |
+| M4 MCP server | 完成 | 手写的 MCP 笔记服务器 + 客户端（stdio 和 Streamable HTTP）+ 越界/越权测试（见"MCP 服务器"）；已用官方 `mcp` SDK 2.3.0 做双向互操作检查（17/17，见 `scripts/mcp_interop.py`） |
 | M5-a 回放、沙箱、任务生成 | 完成 | 确定性回放；Docker 沙箱（有逃逸测试）；变异式任务生成，352 题全部在沙箱里通过 verify |
 | M5-b teacher 轨迹合成与导出 | 完成 | DeepSeek flash 在 257 道 train 题上 2 次采样，513/514 通过，导出 510 条训练样本 |
 | M5-c LoRA 训练 | 完成（第 3 次） | 本机 MLX、4 位基础权重、只对助手轮算 loss、只训练最后 16 层。前两次发散（原因线索见 docs/next_phase_plan.md）；第三次 456 步没有发散，验证损失 2.10 → 0.74 |
@@ -53,10 +53,13 @@
   - `todo`：`todo_write` 工具，每次调用替换整张清单，最多一项 `in_progress`；摘要式压缩时当前清单会被带进新的开头消息，不会随历史丢失。
   - `explore`：只读子 agent。父 agent 调用 `explore(question)`，子 agent 在**全新的上下文**里只能用 `read_file` / `grep` / `glob`（`write_file`、`edit_file`、`bash` 被禁用；不能再开子 agent），最多 12 步，只把一份简短报告（≤6000 字符）返回给父 agent。子 agent 的轨迹写在父轨迹旁的 `explore-N/`，父轨迹里有一条 `subagent` 事件；子 agent 的 token 计入 `run_end` 和 `trajectory_stats`（按未缓存输入算），同一轮的多个 `explore` 并发执行。含 `explore` 的轨迹不能被确定性回放（子 agent 的模型调用不在父轨迹里）。
   - `glob`：按模式列文件（最多 200 条，跳过 `.git` / 虚拟环境，拒绝 `..` 和指向工作区外的符号链接）。
+- **权限规则**（`miniagent/permissions.py`，`--permissions rules.json` 或配置 `permissions`）：`{"deny": [...], "ask": [...], "allow": [...]}`，规则写成 `tool` 或 `tool(模式)`，如 `bash(curl*)`、`write_file(.env*)`、`edit_file(**/secrets/**)`、`mcp__notes__*`。优先级 deny > ask > allow > 工具默认；`--yes` 不能覆盖 deny，allow 也绕不过 `safety.py` 的硬黑名单。路径先规范化（`src/../.env`、工作区内的绝对路径都按 `.env` 匹配）。shell 命令按 `;` `&&` `||` `|` `&` 换行拆段：deny 命中任一段即拒绝；allow 要求每一段都被覆盖，且命令里没有 `$(...)`、反引号、进程替换、重定向，所以 `bash(pytest*)` 不会放行 `pytest; rm -rf x` 或 `pytest > ~/.bashrc`（退回到询问）。轨迹的 `tool_result` 记录 `permission` 和命中的 `rule`。这是便利过滤器，**不是沙箱**；符号链接不会被路径规则跟随。
+- **先读后改与改后诊断**（默认关，`--require-read` / `--diagnostics`，配置里 `require_read` / `diagnostics`）：`edit_file` 拒绝本次运行没有 `read_file`/`write_file` 过的已有文件（针对弱模型凭空写 `old_string`）；改完 `.py`/`.json` 后如果文件不再能解析，在工具结果里追加一行警告（只 `compile`，不执行代码）。
+- **会话恢复与回退**（`miniagent/session.py`；`miniagent` CLI 默认保存，`--no-session` 关闭）：每步把消息列表写入 `session.json`，在可能改文件的步骤开始前把工作区拷贝到 `checkpoints/step-N/`。`miniagent "后续指令" -w repo --resume runs/<id>` 接着聊；`miniagent --rewind runs/<id> --to-step N -w repo` 把文件和对话都退回第 N 步开始时（删除之后新建的文件、恢复被改的文件），之后可再 `--resume`。限制：压缩过的会话只能退到最近一次压缩之后；快照跳过 >1MB 的文件、总量超 50MB 则拒绝回退；不拷贝 `.git` 和虚拟环境；只还原工作区，命令在工作区外造成的副作用不管。运行目录在工作区内时自动排除，不会被快照或删除。
 - **HTTP 服务**（可选，`miniagent/server.py`，见"HTTP 服务"）：把 `Agent.run` 包成 FastAPI 接口，路径白名单、在拷贝上运行、bash 只进沙箱、默认只监听本机。
 - **模型接入**：标准库实现，无第三方 SDK。两种协议：OpenAI 兼容的 chat completions（DeepSeek、智谱 GLM 已验证）和 **Gemini 原生 `generateContent`**（含思考签名的保存与回放，可经转发型中转使用）。配置文件里用 `base_url` / `base_url_env` / `api_key_env` / `extra_body` / `api_style` 指定，密钥永远从环境变量读
 
-**尚未实现**（避免误解）：按条件导出轨迹到网页之外的格式（SFT 导出已有，见上）、HTTP 传输的 MCP；和主流 coding agent 相比还缺交互界面（TUI / 流式 / 中途打断）、按工具和命令前缀的权限规则、hooks / skills / 插件、git 集成（分支 / 提交 / PR）、会话恢复与检查点回退、LSP 诊断与符号索引、Anthropic 原生协议、plan 模式（只有 todo 工具）。**新增的校验 / 并行 / memory / todo / explore 只有单元测试和变异检验，还没有用真实模型在 dev 集上评测过**（没有 API 密钥），`configs/feat-*.json` 里写好了运行前的预测，见"可选功能的评测计划"。
+**尚未实现**（避免误解）：按条件导出轨迹到网页之外的格式（SFT 导出已有，见上）；和主流 coding agent 相比还缺交互界面（TUI / 流式 / 中途打断）、hooks / skills / 插件、git 集成（分支 / 提交 / PR）、真正的 LSP 与符号索引（只有改后的语法检查）、Anthropic 原生协议、plan 模式（只有 todo 工具）、MCP 的 OAuth / resources / prompts。**本节新增的所有功能（校验、并行、memory、todo、explore、先读后改、诊断、权限、会话）只有单元测试和变异检验，还没有用真实模型在 dev 集上评测过**（没有 API 密钥），`configs/feat-*.json` 里写好了运行前的预测，一条命令 `scripts/run_feature_evals.sh` 即可全部跑完，见"可选功能的评测计划"。
 
 ## 快速开始
 
@@ -268,12 +271,15 @@ python3 -m venv .venv-mlx && .venv-mlx/bin/pip install --only-binary :all: mlx-l
 
 ### 可选功能的评测计划（尚未运行）
 
-`configs/feat-todo-flash.json`、`feat-explore-flash.json`、`feat-todo-g35.json` 各只打开一个功能，预测写在 `hypothesis` 里（运行前写的）：flash 已接近天花板（约 90%），13 题 × 3 次下预计通过率变化在 ±8 点内、检测不到；`explore` 预计让父 agent 的输入 token 降而总成本升 10–40%（子 agent 要重新读文件）；`todo` 在 Gemini 弱模型上预计不改变"假完成"。跑完后若预测被推翻就照实记在 `docs/ablations.md`。校验和并行不改变模型看到的内容（除了参数错误时的报错文字），只会影响工具耗时，用 `--no-validate` / `--no-parallel` 做对照即可。
+`configs/feat-todo-flash.json`、`feat-explore-flash.json`、`feat-readfirst-flash.json`、`feat-diag-flash.json`、`feat-perms-flash.json`、`feat-todo-g35.json` 各只打开一个功能，预测写在 `hypothesis` 里（运行前写的）：flash 已接近天花板（约 90%），13 题 × 3 次下预计通过率变化在 ±8 点内、检测不到；`explore` 预计让父 agent 的输入 token 降而总成本升 10–40%（子 agent 要重新读文件）；`todo` 在 Gemini 弱模型上预计不改变"假完成"。跑完后若预测被推翻就照实记在 `docs/ablations.md`。校验和并行不改变模型看到的内容（除了参数错误时的报错文字），只会影响工具耗时，用 `--no-validate` / `--no-parallel` 做对照即可。
 
 ```bash
 miniagent-eval run --config configs/feat-explore-flash.json --split dev --tasks b --repeat 3 --workers 4
 miniagent-eval compare results/<baseline-run> results/<feat-run>
+scripts/run_feature_evals.sh        # 基线 + 五个 flash 配置，各 13 题 × 3 次，约 $1~2；需要 DEEPSEEK_API_KEY
 ```
+
+`require_read` 和 `diagnostics` 是为弱模型设计的（学生模型 94 次编辑里 76 次的 `old_string` 是凭空写的），flash 几乎不会触发，预计看不出差别，所以它们在 flash 上的结果只能说明"没有伤害"，不能说明"有用"。
 
 ## 目录结构
 
@@ -321,7 +327,7 @@ agent 会执行模型生成的命令，存在风险：
 
 ## 已知局限
 
-- MCP：协议实现是**对照规范手写**的，没有用官方客户端/SDK 做过互操作验证（这需要安装第三方依赖，尚未执行）；只做了 stdio 传输，没有 HTTP；只有工具能力，没有 resources / prompts。
+- MCP：协议实现是**对照规范手写**的；`scripts/mcp_interop.py` 用官方 `mcp` SDK 2.3.0 做了 17 项检查全部通过（我们的 HTTP 客户端连 SDK 服务端、我们的 stdio 客户端连 SDK 服务端、SDK 客户端连我们的笔记服务端，含路径越界和越权调用），但这只是一个版本、一个小服务端的结果。这次互操作检查发现了一个真实缺陷：我的 HTTP 客户端最初没发新协议要求的 `MCP-Protocol-Version` / `Mcp-Method` / `Mcp-Name` 请求头，探测被 SDK 拒绝后悄悄回退到旧握手；用 `curl` 看错误信息才定位到，已修复并在自带的假服务端里加了对应的校验（现在 stdio 和 HTTP 都协商到新协议）。这些头的要求是从 SDK 的报错推出来的，我没有对照规范原文核对。HTTP 客户端只有 Streamable HTTP 的 POST 部分，没有服务端主动推送的 GET 流、没有断线重连、没有 OAuth；只有工具能力，没有 resources / prompts。笔记服务端本身仍只有 stdio。
 - 只针对 coding 场景，其他场景未验证。
 - **样本小**：每个条件 13 题 × 1～3 次。弱模型在 13 题 × 1 次下，小于约 35 个百分点的差距无法与噪声区分；强模型接近天花板时，5～8 点的差异也落在区间之内。还没有同一条件的重复基线来直接测噪声。
 - **一个强模型 + 几个弱模型**：强模型的基线已饱和（约 90%），所以很多消融差异落在噪声内；弱模型的结果受免费档额度和服务端稳定性限制。
@@ -340,7 +346,7 @@ agent 会执行模型生成的命令，存在风险：
 - [x] 压缩触发加滞回（案例 2，有测试）
 - [x] M2 收尾：压缩修复在 Gemini 3.5 上重跑（`g35-ctx3k-fixed`、`g35-ctx12k`），预测逐条核对
 - [x] M3 回放与并排对比（未做按条件导出）
-- [x] M4 MCP server 与越权测试（未做官方客户端互操作验证）
+- [x] M4 MCP server 与越权测试；HTTP 客户端 + 官方 SDK 双向互操作检查
 - [x] M5-a 确定性回放、Docker 沙箱(含逃逸测试)、变异式任务生成(352 题)
 - [x] M5-b teacher 轨迹合成与 SFT 数据导出(510 条,只取 train)
 - [x] M5-c LoRA 训练(前两次发散,第三次成功)
@@ -349,7 +355,8 @@ agent 会执行模型生成的命令，存在风险：
 - [x] HTTP 服务入口（FastAPI，可选依赖，19 个测试）
 - [ ] 已决定不做（下层 2026-10-28 收工，理由见 docs/next_phase_plan.md 末尾）：数据消融、一次 test、对照实验(只改 Adam 偏差修正)、切窗训练
 - [x] 对标主流 coding agent 补缺口：参数校验、并行只读工具、`AGENTS.md` 记忆、todo 工具、只读 explore 子 agent、glob（有测试和变异检验；**真实模型评测未跑**）
-- [ ] 上述功能在 dev 集上的评测（`configs/feat-*.json`，需要 API 额度）
+- [x] 先读后改、改后诊断、权限规则、会话恢复/回退、MCP Streamable HTTP 客户端（有测试和变异检验）
+- [ ] 上述所有功能在 dev 集上的评测（`scripts/run_feature_evals.sh`，需要 API 额度；这一步没做）；顺带跑一次 test 集
 - [ ] 上下文工程(可选):摘要 vs 结构化笔记
 
 ## 许可证

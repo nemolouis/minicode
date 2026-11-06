@@ -1,0 +1,14 @@
+{
+  "name": "feat-diag-flash",
+  "model": "deepseek-flash",
+  "temperature": 0.0,
+  "max_steps": 50,
+  "max_tokens": 16384,
+  "context_limit": 100000,
+  "keep_recent": 8,
+  "disabled_tools": [],
+  "hypothesis": "PREDICTION: the B-layer tasks are logic bugs, so a post-edit syntax warning appears in <10% of runs; pass rate within +-8 points of baseline. Expected effect on flash: none.",
+  "base_url": "https://api.deepseek.com",
+  "api_key_env": "DEEPSEEK_API_KEY",
+  "diagnostics": true
+}

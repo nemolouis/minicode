@@ -1,0 +1,14 @@
+{
+  "name": "feat-readfirst-flash",
+  "model": "deepseek-flash",
+  "temperature": 0.0,
+  "max_steps": 50,
+  "max_tokens": 16384,
+  "context_limit": 100000,
+  "keep_recent": 8,
+  "disabled_tools": [],
+  "hypothesis": "PREDICTION (baseline = flash, B-layer dev 13 tasks x 3, ~90%): flash reads a file before editing it in nearly every run, so require_read fires in <10% of runs and the pass rate stays within +-8 points of baseline; mean steps change by <1. The guard is aimed at weak models (their edits copy text that was never shown: 76/94 for the fine-tuned student) and cannot be evaluated on flash.",
+  "base_url": "https://api.deepseek.com",
+  "api_key_env": "DEEPSEEK_API_KEY",
+  "require_read": true
+}

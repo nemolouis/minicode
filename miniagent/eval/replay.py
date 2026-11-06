@@ -15,6 +15,7 @@ import tempfile
 from pathlib import Path
 
 from ..agent import SYSTEM_PROMPT, Agent
+from ..permissions import Permissions
 from ..replay import ReplayMiss, TrajectoryReplayClient
 from ..tools import Workspace, build_tools
 from ..trajectory import Trajectory
@@ -86,7 +87,8 @@ def replay_run(traj_path: str | Path, tasks_root: str | Path = "tasks") -> dict:
         copy_repo(task.repo, work)
         new_dir = Path(tmp) / "traj"
         agent = Agent(
-            client=client, model=start["model"], workspace=Workspace(work), trajectory=Trajectory(new_dir),
+            client=client, model=start["model"], workspace=Workspace(work, **cfg.get("workspace_options", {})), trajectory=Trajectory(new_dir),
+            permissions=Permissions.from_dict(cfg.get("permissions")),
             max_steps=cfg["max_steps"], max_tokens=cfg["max_tokens"], context_limit=cfg["context_limit"],
             keep_recent=cfg["keep_recent"], compact_regrowth=cfg.get("compact_regrowth", 1.0),
             temperature=cfg.get("temperature"), disabled_tools=tuple(sorted(builtin - set(cfg["tools"]))),

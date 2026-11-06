@@ -12,6 +12,8 @@ from typing import Callable
 from .client import ModelResponse
 from .features import FEATURES, explore_tool, render_todos, todo_tool, with_project_memory
 from .sandbox import SandboxError
+from . import session as sess
+from .permissions import Permissions
 from .schema import signature, validate
 from .tools import Tool, ToolError, Workspace, build_tools, glob_tool
 from .trajectory import Trajectory
@@ -71,6 +73,10 @@ class Agent:
     # "explore" (read-only sub-agent tool), "glob" (file listing tool).
     features: tuple[str, ...] = ()
     explore_max_steps: int = 12
+    # Allow/ask/deny rules over tool calls, see miniagent.permissions. None = each tool's own default.
+    permissions: Permissions | None = None
+    # Write session.json and workspace checkpoints next to the trajectory so the run can be resumed / rewound (miniagent.session).
+    session: bool = False
 
     def __post_init__(self):
         bad = set(self.features) - FEATURES
@@ -96,30 +102,47 @@ class Agent:
             self.sub_usage["output"] += output_tokens
 
     # ------------------------------------------------------------ main loop
-    def run(self, task: str) -> RunResult:
-        messages: list[dict] = [{"role": "user", "content": task}]
+    def run(self, task: str, resume: dict | None = None) -> RunResult:
+        """Run `task`. With `resume` (a state from miniagent.session.load_session) the earlier conversation is continued:
+        `task` is added as a new user message and step numbers go on from where the session stopped."""
+        base = resume["step"] if resume else 0
+        self._step_index: dict[int, int] = dict(resume["step_index"]) if resume else {}
+        self._todos_at: dict[int, list] = dict(resume["todos_at"]) if resume else {}
+        if resume:
+            messages: list[dict] = list(resume["messages"]) + [{"role": "user", "content": task}]
+            self.todos = list(resume.get("todos", []))
+        else:
+            messages = [{"role": "user", "content": task}]
+        self._session_task = resume["task"] if resume else task
         self.trajectory.log(
-            "run_start", task=task, model=self.model, meta=self.meta,
+            "run_resume" if resume else "run_start", task=task, model=self.model, meta=self.meta,
             config={"max_steps": self.max_steps, "context_limit": self.context_limit,
                     "keep_recent": self.keep_recent, "compact_regrowth": self.compact_regrowth, "max_tokens": self.max_tokens,
                     "temperature": self.temperature, "tools": sorted(self.tools),
                     **({"features": sorted(self.features)} if self.features else {}),
+                    **({"workspace_options": opts} if (opts := {k: True for k in ("require_read", "diagnostics")
+                                                                 if getattr(self.workspace, k, False)}) else {}),
+                    **({"permissions": self.permissions.to_dict()} if self.permissions else {}),
                     "system_sha1": hashlib.sha1(self.system.encode()).hexdigest()[:12]},
             # full text, so the exact model input can be rebuilt later (SFT export) without guessing from a hash
             system=self.system, tool_specs=[t.spec() for t in self.tools.values()])
         in_tok = out_tok = 0
-        last_input = 0
+        last_input = resume.get("last_input", 0) if resume else 0
         floor: int | None = None        # input tokens measured on the first request after the latest compaction
         awaiting_floor = False
         final_text = ""
         status = "max_steps"
-        step = 0
+        step = base
         try:
-            for step in range(1, self.max_steps + 1):
+            for step in range(base + 1, base + self.max_steps + 1):
                 if last_input > self._compact_trigger(floor):
                     messages = self._compact(messages, trigger_tokens=last_input)
                     awaiting_floor = True
                     last_input = 0
+                    self._step_index.clear()          # the old positions no longer exist: only later steps can be rewound to
+                    self._todos_at.clear()
+                self._step_index[step] = len(messages)
+                self._todos_at[step] = [dict(t) for t in self.todos]
 
                 t0 = time.time()
                 resp: ModelResponse = self.client.chat(
@@ -151,9 +174,12 @@ class Agent:
                 final_text = resp.text
 
                 if resp.tool_calls:
+                    self._checkpoint(step, calls)
                     messages.extend(self._run_tools(step, calls))
+                    self._save_session(messages, step, last_input)
                     continue
                 status = "done" if resp.finish_reason == "stop" else resp.finish_reason
+                self._save_session(messages, step, last_input)
                 break
         except Exception as e:  # API failure etc.; keep the trajectory consistent
             self.trajectory.log("run_end", status="error", steps=step, error=repr(e),
@@ -167,6 +193,29 @@ class Agent:
                             **({"subagent_input_tokens": self.sub_usage["input"], "subagent_output_tokens": self.sub_usage["output"]}
                                if self.sub_usage["input"] or self.sub_usage["output"] else {}))
         return RunResult(status, step, final_text, in_tok, out_tok)
+
+    # -------------------------------------------------------------- session
+    def _run_dir(self):
+        return self.trajectory.path.parent if (self.session and self.trajectory.path) else None
+
+    def _checkpoint(self, step: int, calls: list[dict]) -> None:
+        run_dir = self._run_dir()
+        if run_dir is None:
+            return
+        if all((t := self.tools.get(c["name"])) is not None and t.read_only for c in calls):
+            return                                 # nothing here can change files
+        info = sess.snapshot(self.workspace.root, run_dir / "checkpoints" / f"step-{step}",
+                             exclude=sess.exclusions(self.workspace.root, run_dir))
+        self.trajectory.log("checkpoint", step=step, **info)
+
+    def _save_session(self, messages: list[dict], step: int, last_input: int) -> None:
+        run_dir = self._run_dir()
+        if run_dir is None:
+            return
+        sess.save_session(run_dir, {
+            "task": self._session_task, "model": self.model, "workspace": str(self.workspace.root),
+            "system_sha1": hashlib.sha1(self.system.encode()).hexdigest()[:12], "messages": messages, "step": step,
+            "step_index": self._step_index, "todos": self.todos, "todos_at": self._todos_at, "last_input": last_input})
 
     # ---------------------------------------------------------------- tools
     def _run_tools(self, step: int, calls: list[dict]) -> list[dict]:
@@ -196,7 +245,17 @@ class Agent:
     def _concurrent_ok(self, call: dict) -> bool:
         tool = self.tools.get(call["name"])
         # a call with bad arguments may sit in the batch: _execute rejects it without running anything
-        return bool(tool and tool.read_only and not tool.needs_confirm and not call.get("parse_error"))
+        return bool(tool and tool.read_only and not call.get("parse_error") and not self._needs_confirm(tool, call))
+
+    def _decision(self, call: dict):
+        from .permissions import Decision
+        if self.permissions is None or not isinstance(call.get("input"), dict):
+            return Decision("default")
+        return self.permissions.decide(call["name"], call["input"], self.workspace.root)
+
+    def _needs_confirm(self, tool: Tool, call: dict) -> bool:
+        action = self._decision(call).action
+        return True if action == "ask" else False if action == "allow" else tool.needs_confirm
 
     def _arg_errors(self, tool: Tool, args: dict) -> list[str]:
         return validate(args, tool.input_schema) if self.validate_args else []
@@ -217,8 +276,11 @@ class Agent:
             out, is_error = f"error: arguments are not valid JSON ({call['parse_error']})", True
         elif errs := self._arg_errors(tool, args):
             out, is_error = f"error: invalid arguments for {name}: {'; '.join(errs)}. Expected {signature(tool.input_schema)}", True
+        elif (decision := self._decision(call)).action == "deny":
+            approved, is_error = False, True
+            out = f"denied by permission rule {decision.rule!r}; this action is not allowed, try a different approach"
         else:
-            if tool.needs_confirm and not self.confirm(name, args):
+            if self._needs_confirm(tool, call) and not self.confirm(name, args):
                 approved, is_error, out = False, True, "user denied this action; try a different approach or explain why it is needed"
             else:
                 try:
@@ -231,12 +293,16 @@ class Agent:
                     out, is_error = f"error: bad arguments ({e!r})", True
                 except Exception as e:  # tool bug must not kill the run
                     out, is_error = f"error: {type(e).__name__}: {e}", True
-        return {"output": out, "is_error": is_error, "approved": approved, "duration_s": round(time.time() - t0, 3)}
+        res = {"output": out, "is_error": is_error, "approved": approved, "duration_s": round(time.time() - t0, 3)}
+        if self.permissions is not None and tool is not None and (d := self._decision(call)).action != "default":
+            res["permission"], res["rule"] = d.action, d.rule
+        return res
 
     def _log_tool(self, step: int, call: dict, r: dict, parallel: int = 1) -> dict:
         self.trajectory.log("tool_result", step=step, tool_call_id=call["id"], name=call["name"], input=call["input"],
                             output=r["output"], is_error=r["is_error"], approved=r["approved"], duration_s=r["duration_s"],
-                            **({"parallel": parallel} if parallel > 1 else {}))
+                            **({"parallel": parallel} if parallel > 1 else {}),
+                            **({"permission": r["permission"], "rule": r["rule"]} if "permission" in r else {}))
         return {"role": "tool", "tool_call_id": call["id"], "content": r["output"]}
 
     # ----------------------------------------------------------- compaction
