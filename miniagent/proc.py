@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 import signal
 import subprocess
+import time
 from dataclasses import dataclass
 
 
@@ -19,6 +20,7 @@ class ShellResult:
     stdout: str
     stderr: str
     timed_out: bool
+    cancelled: bool = False
 
 
 def _kill_group(pgid: int) -> None:
@@ -28,16 +30,26 @@ def _kill_group(pgid: int) -> None:
         pass
 
 
-def run_shell(args, *, cwd=None, env=None, timeout: float = 60, shell: bool = False) -> ShellResult:
+def run_shell(args, *, cwd=None, env=None, timeout: float = 60, shell: bool = False, cancel=None) -> ShellResult:
+    """Run a command. `cancel` (a threading.Event) stops it early: the process group is killed and the result says `cancelled`."""
     p = subprocess.Popen(args, shell=shell, cwd=cwd, env=env, text=True, errors="replace",
                          stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                          start_new_session=True)
+    deadline = time.monotonic() + timeout
     try:
-        out, err = p.communicate(timeout=timeout)
-        return ShellResult(p.returncode, out, err, False)
-    except subprocess.TimeoutExpired:
-        _kill_group(p.pid)
-        out, err = p.communicate()
-        return ShellResult(None, out or "", err or "", True)
+        while True:
+            wait = min(0.2, max(deadline - time.monotonic(), 0.001)) if cancel is not None else max(deadline - time.monotonic(), 0.001)
+            try:
+                out, err = p.communicate(timeout=wait)
+                return ShellResult(p.returncode, out, err, False)
+            except subprocess.TimeoutExpired:
+                if cancel is not None and cancel.is_set():
+                    _kill_group(p.pid)
+                    out, err = p.communicate()
+                    return ShellResult(None, out or "", err or "", False, cancelled=True)
+                if time.monotonic() >= deadline:
+                    _kill_group(p.pid)
+                    out, err = p.communicate()
+                    return ShellResult(None, out or "", err or "", True)
     finally:
         _kill_group(p.pid)       # stragglers left behind by a command that did finish

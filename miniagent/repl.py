@@ -18,13 +18,11 @@ import difflib
 import json
 import os
 import sys
-import tempfile
 import time
 from pathlib import Path
 from typing import Callable
 
-from . import session as sess
-from .trajectory import Trajectory
+from .controller import ControllerError, SessionController, workspace_diff  # noqa: F401  (workspace_diff re-exported)
 
 PROMPT = "miniagent> "
 HELP = """commands (everything else is sent to the agent):
@@ -125,62 +123,27 @@ def colour_diff_line(term: Terminal, line: str) -> str:
     return line
 
 
-def workspace_diff(baseline: Path, workspace: Path, exclude: list[str] = ()) -> list[str]:
-    """Unified diff of the workspace against a `session.snapshot` taken earlier (text files only; others are listed)."""
-    meta = json.loads((baseline / "manifest.json").read_text())
-    before = set(meta["files"])
-    now = {p.relative_to(workspace).as_posix() for p in sess._files(workspace, exclude)}
-    out: list[str] = []
-    for rel in sorted(before | now):
-        old_p, new_p = baseline / "files" / rel, workspace / rel
-        if rel in before and rel in meta["skipped"]:
-            continue                                                       # too large to have been copied: cannot say
-        try:
-            old = old_p.read_text(encoding="utf-8").splitlines() if rel in before else []
-            new = new_p.read_text(encoding="utf-8").splitlines() if rel in now else []
-        except (UnicodeDecodeError, OSError):
-            if rel in before and rel in now and old_p.read_bytes() != new_p.read_bytes():
-                out.append(f"Binary file {rel} differs")
-            continue
-        if old == new and rel in before and rel in now:
-            continue
-        label_a, label_b = (f"a/{rel}" if rel in before else "/dev/null"), (f"b/{rel}" if rel in now else "/dev/null")
-        out += list(difflib.unified_diff(old, new, label_a, label_b, lineterm=""))
-    return out
-
-
-class _TeeTrajectory(Trajectory):
-    """A trajectory file that also tells the terminal what happens."""
-
-    def __init__(self, run_dir, on_event: Callable[[str, dict], None]):
-        super().__init__(run_dir)
-        self._on_event = on_event
-
-    def log(self, event: str, **data) -> None:
-        super().log(event, **data)
-        self._on_event(event, data)
-
-
 class Repl:
     def __init__(self, *, make_agent: Callable[..., object], run_dir: Path, workspace: Path, term: Terminal, new_run_dir: Callable[[], Path],
                  resume: dict | None = None, git=None, price: dict | None = None, auto_approve: bool = False, stream: bool = False):
-        self.make_agent, self.run_dir, self.workspace, self.term = make_agent, Path(run_dir), Path(workspace).resolve(), term
-        self.new_run_dir, self.git, self.price = new_run_dir, git, price
+        self.term = term
+        self.ctl = SessionController(make_agent=make_agent, run_dir=run_dir, workspace=workspace, new_run_dir=new_run_dir, resume=resume,
+                                     git=git, price=price)
         self.auto_approve, self.stream = auto_approve, stream
-        self.state: dict | None = resume                  # the saved session the next turn continues (None before the first turn)
-        self.turn_starts: list[int] = []                  # step number at which each turn began (for /undo)
-        self.tokens = {"in": 0, "out": 0}
-        self.turns = 0
-        self._baseline_dir = Path(tempfile.mkdtemp(prefix="miniagent-base-"))
-        self._exclude: list[str] = []
-        self.agent = None
+
+    # the controller's state, under the names the rest of the code (and the tests) use
+    run_dir = property(lambda self: self.ctl.run_dir)
+    workspace = property(lambda self: self.ctl.workspace)
+    state = property(lambda self: self.ctl.state)
+    turns = property(lambda self: self.ctl.turns)
+    tokens = property(lambda self: self.ctl.tokens)
+    agent = property(lambda self: self.ctl.agent)
+    git = property(lambda self: self.ctl.git)
 
     # ---------------------------------------------------------------- lifecycle
     def run(self) -> int:
         t = self.term
-        self._exclude = sess.exclusions(self.workspace, self.run_dir.resolve())
-        sess.snapshot(self.workspace, self._baseline_dir, exclude=self._exclude)
-        self._open_agent()
+        self._open()
         t.line(t.style("miniagent", "1") + f"  {self.agent.model}  {self.workspace}" + ("  (resumed)" if self.state else ""))
         t.line(t.style("type a task, or /help. Ctrl-C stops a turn, /exit or Ctrl-D leaves.", "2"))
         try:
@@ -201,21 +164,17 @@ class Repl:
             self.close()
         return 0
 
+    def _open(self) -> None:
+        self.ctl.open(on_event=self._event, on_text=self._stream_text if self.stream else None, confirm=self.confirm)
+
     def close(self) -> None:
-        if self.agent is not None and getattr(self.agent, "background", None) is not None:
-            self.agent.background.kill_all()
-        import shutil
-        shutil.rmtree(self._baseline_dir, ignore_errors=True)
+        self.ctl.close()
         t = self.term
         if self.turns:
             t.line(t.style(f"session: {self.run_dir}", "2"))
             t.line(t.style(f"continue later with: miniagent -w {self.workspace} --resume {self.run_dir}", "2"))
             if self.git is not None:
                 t.line(self.git.summary())
-
-    def _open_agent(self) -> None:
-        self.agent = self.make_agent(trajectory=_TeeTrajectory(self.run_dir, self._event), on_text=self._stream_text if self.stream else None,
-                                     confirm=self.confirm)
 
     def _read_message(self) -> str | None:
         first = self.term.read(PROMPT)
@@ -254,16 +213,8 @@ class Repl:
     # ---------------------------------------------------------------- one turn
     def turn(self, text: str) -> None:
         t = self.term
-        self.turn_starts.append(self.state["step"] if self.state else 0)
         t0 = time.time()
-        res = self.agent.run(text, resume=self.state)
-        self.turns += 1
-        self.tokens["in"] += res.input_tokens
-        self.tokens["out"] += res.output_tokens
-        try:
-            self.state = sess.load_session(self.run_dir)
-        except (FileNotFoundError, ValueError):
-            self.state = None
+        res = self.ctl.run_turn(text)
         if self.stream:
             t.line()
         elif res.final_text:
@@ -329,8 +280,8 @@ class Repl:
         handler = {
             "/help": lambda: t.line(HELP), "/?": lambda: t.line(HELP),
             "/exit": None, "/quit": None,
-            "/status": self._status, "/cost": self._cost, "/diff": self._diff, "/steps": self._steps, "/todo": self._todo,
-            "/undo": self._undo, "/clear": self._clear,
+            "/status": self._status, "/cost": lambda: t.line(self.ctl.cost_text()), "/diff": self._diff, "/steps": self._steps,
+            "/todo": self._todo, "/undo": lambda: self._attempt(self.ctl.undo), "/clear": lambda: t.line(self._clear()),
             "/rewind": lambda: self._rewind(arg), "/model": lambda: self._model(arg),
             "/stream": lambda: self._toggle("stream", arg), "/yes": lambda: self._toggle("yes", arg),
         }
@@ -342,27 +293,20 @@ class Repl:
         handler[name]()
         return True
 
-    def _status(self) -> None:
-        a, t = self.agent, self.term
-        t.line(f"model {a.model} | workspace {self.workspace} | session {self.run_dir}")
-        flags = [n for n, on in (("stream", self.stream), ("auto-approve", self.auto_approve), ("git", self.git is not None),
-                                 ("session", a.session)) if on] + [f"features={','.join(sorted(a.features))}" if a.features else ""]
-        t.line("mode: " + (", ".join(f for f in flags if f) or "default") + f" | tools: {', '.join(sorted(a.tools))}")
-        t.line(f"{self.turns} turn(s), step {self.state['step'] if self.state else 0}, {self.tokens['in']} in / {self.tokens['out']} out tokens")
+    def _attempt(self, action) -> None:
+        """Run a controller action and show its message; a ControllerError is shown as is (red if it says the action cannot be done)."""
+        try:
+            self.term.line(action())
+        except ControllerError as e:
+            self.term.line(self.term.style(str(e), "31") if str(e).startswith("cannot") else str(e))
 
-    def _cost(self) -> None:
-        t, price = self.term, self.price
-        line = f"{self.tokens['in']} input + {self.tokens['out']} output tokens in {self.turns} turn(s)"
-        if price and all(price.get(k) is not None for k in ("input", "output")):
-            usd = (self.tokens["in"] * price["input"] + self.tokens["out"] * price["output"]) / 1e6
-            line += f" ≈ ${usd:.4f} (cache discounts not applied: an upper bound)"
-        else:
-            line += " (no price known for this model: pass --prices with an entry for it)"
-        t.line(line)
+    def _status(self) -> None:
+        for line in self.ctl.status_lines([n for n, on in (("stream", self.stream), ("auto-approve", self.auto_approve)) if on]):
+            self.term.line(line)
 
     def _diff(self) -> None:
         t = self.term
-        lines = workspace_diff(self._baseline_dir, self.workspace, self._exclude)
+        lines = self.ctl.diff_lines()
         if not lines:
             t.line("no changes since the session started")
             return
@@ -371,58 +315,18 @@ class Repl:
 
     def _steps(self) -> None:
         t = self.term
-        if not self.state or not self.state["step_index"]:
+        steps = self.ctl.steps()
+        if not steps:
             t.line("nothing to rewind to yet")
             return
-        what: dict[int, str] = {}
-        try:
-            for e in sess_events(self.run_dir):
-                if e["event"] == "model_call":
-                    names = [c["name"] for c in e["tool_calls"]]
-                    what[e["step"]] = ", ".join(names) if names else "final answer"
-        except OSError:
-            pass
-        ckpt = set(sess.checkpoint_steps(self.run_dir))
-        for s in sorted(self.state["step_index"]):
-            t.line(f"  step {s:>3}  {what.get(s, '?'):<40}" + ("  (files changed here)" if s in ckpt else ""))
+        for s in steps:
+            t.line(f"  step {s.step:>3}  {s.what:<40}" + ("  (files changed here)" if s.files_changed else ""))
 
     def _rewind(self, arg: str) -> None:
-        t = self.term
         if not arg.isdigit():
-            t.line("usage: /rewind N   (see /steps)")
+            self.term.line("usage: /rewind N   (see /steps)")
             return
-        self._do_rewind(int(arg))
-
-    def _do_rewind(self, step: int) -> None:
-        t = self.term
-        try:
-            info = sess.rewind(self.run_dir, step, self.workspace)
-        except (ValueError, FileNotFoundError) as e:
-            t.line(t.style(f"cannot rewind: {e}", "31"))
-            return
-        self.state = sess.load_session(self.run_dir)
-        t.line(f"rewound to the start of step {step}: {info['restored']} file(s) restored, {info['removed']} removed; the next message continues from there")
-        if self.git is not None:
-            t.line(t.style("note: --git commits made after that point stay in the branch history", "2"))
-
-    def _undo(self) -> None:
-        t = self.term
-        if not self.turn_starts:
-            t.line("nothing to undo")
-            return
-        step = self.turn_starts[-1] + 1
-        if step not in (self.state or {}).get("step_index", {}):
-            t.line(t.style("cannot undo that turn (a compaction since then removed the rewind point; try /steps)", "31"))
-            return
-        self.turn_starts.pop()
-        self._do_rewind(step)
-        # rewinding to the first step of a turn keeps that turn's user message (the model call at that step sees it); undoing the turn
-        # means the message goes too
-        state = sess.load_session(self.run_dir)
-        if state["messages"] and state["messages"][-1]["role"] == "user":
-            state["messages"].pop()
-            sess.save_session(self.run_dir, state)
-            self.state = sess.load_session(self.run_dir)
+        self._attempt(lambda: self.ctl.rewind(int(arg)))
 
     def _todo(self) -> None:
         t = self.term
@@ -436,7 +340,7 @@ class Repl:
         if not arg:
             self.term.line(f"model: {self.agent.model}")
             return
-        self.agent.model = arg
+        self.ctl.set_model(arg)
         self.term.line(f"model for the next turns: {arg}")
 
     def _toggle(self, what: str, arg: str) -> None:
@@ -451,16 +355,5 @@ class Repl:
             self.auto_approve = on
         self.term.line(f"{what}: {'on' if on else 'off'}")
 
-    def _clear(self) -> None:
-        if self.agent is not None and getattr(self.agent, "background", None) is not None:
-            self.agent.background.kill_all()
-        self.run_dir = Path(self.new_run_dir())
-        self.state, self.turn_starts, self.turns = None, [], 0
-        self._exclude = sess.exclusions(self.workspace, self.run_dir.resolve())
-        self._open_agent()
-        self.term.line(f"new conversation; session directory {self.run_dir}")
-
-
-def sess_events(run_dir: Path) -> list[dict]:
-    from .trajectory import read_events
-    return read_events(Path(run_dir) / "trajectory.jsonl")
+    def _clear(self) -> str:
+        return self.ctl.clear()

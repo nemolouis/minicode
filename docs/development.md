@@ -21,6 +21,7 @@ make check          # ruff + pytest + 黄金轨迹的格式检查（CI 跑的就
 | 变异检验 | 无脚本，是做法 | 写完测试后逐个破坏实现（去掉一道检查、改一个阈值），确认测试会失败；活下来的变异要么补测试，要么证明是冗余防线。最近一轮：执行器、压缩、会话、权限、MCP HTTP 约 100 处，最终幸存的都是冗余检查 |
 | 文档链接 | `tests/test_docs_links.py` | README 拆分后相对链接不能断 |
 | 覆盖率 | `pytest --cov`（`make cov`），CI 里 3.12 作业把摘要写进 job summary | 分支覆盖率下限 80%（`pyproject.toml`），本地不含 Docker 时约 84%。最弱的是 `eval/cli.py`（run / export / report 命令，约 37%）、`sandbox.py` 和 `taskgen/generate.py`（后两者要 Docker，由 CI 的 docker 作业运行）。下限只是防止丢测试的绊线，不是目标 |
+| 终端界面的无头测试 | `tests/test_tui.py`、`tests/test_cancel.py` | 用 Textual 的 pilot 在无头模式下驱动整个界面（脚本化模型、真实工作区、真实会话文件）：流式回答、工具卡片、审批面板的每个按键、打断、斜杠菜单与补全、`/diff` `/undo` `/steps`、侧栏、续聊时渲染历史、退出键。协作式取消（`Agent.cancel()`）单独测试：打断流式回复、杀掉正在跑的命令的整个进程组、取消后会话可继续。视觉效果用无头渲染的 SVG 截图检查；真实终端里用 pty 跑通过一遍（启动、输入、审批、退出码与退出摘要） |
 | 统计 | `miniagent/eval/stats.py`、`noise.py` | 比较两次运行的检验、Wilson 区间、噪声下限，见 [eval.md](eval.md) |
 
 ## 代码结构（agent 核心）

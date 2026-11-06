@@ -110,6 +110,9 @@ def main(argv=None) -> int:
                     "(needs a git repository with a clean tree; nothing is pushed)")
     ap.add_argument("--api-style", choices=["openai", "anthropic", "gemini"], default=None,
                     help="wire protocol (default openai-compatible, key from LLM_API_KEY / DEEPSEEK_API_KEY; anthropic: ANTHROPIC_API_KEY)")
+    ap.add_argument("--ui", choices=["auto", "tui", "repl"], default="auto",
+                    help="interactive mode (no task given): tui = the full-screen terminal app (needs: pip install 'miniagent[tui]'), "
+                         "repl = plain line-by-line, auto = tui when Textual is installed and this is a terminal")
     ap.add_argument("--stream", action="store_true", help="print the model's reply as it is generated (OpenAI-compatible endpoints)")
     ap.add_argument("--output-budget", action="store_true", help="shrink the size of one tool output as the context fills up")
     ap.add_argument("--max-cost", type=float, help="stop before the request that would exceed this many USD (needs a price in --prices)")
@@ -214,12 +217,27 @@ def main(argv=None) -> int:
             )
 
         if interactive:
-            from .repl import Repl, Terminal
             price = None
             try:
                 price = (json.loads(Path(args.prices).read_text()).get(args.model) or {}).get("off_peak")
             except (OSError, ValueError):
                 pass
+            from . import tui
+            use_tui = args.ui == "tui" or (args.ui == "auto" and tui.available() and sys.stdin.isatty() and sys.stdout.isatty())
+            if use_tui and not tui.available():
+                print("error: the terminal UI needs Textual: pip install 'miniagent[tui]'  (or use --ui repl)", file=sys.stderr)
+                return 2
+            if use_tui:
+                from .controller import SessionController
+                ctl = SessionController(make_agent=make_agent, run_dir=run_dir, workspace=Path(args.workspace),
+                                        new_run_dir=lambda: _new_run_dir(Path(args.runs_dir)), resume=resume, git=git, price=price)
+                tui.run(ctl, auto_approve=args.yes)
+                if ctl.turns:
+                    print(f"session: {ctl.run_dir}\ncontinue later with: miniagent -w {args.workspace} --resume {ctl.run_dir}")
+                    if git is not None:
+                        print(git.summary())
+                return 0
+            from .repl import Repl, Terminal
             return Repl(make_agent=make_agent, run_dir=run_dir, workspace=Path(args.workspace), term=Terminal(),
                         new_run_dir=lambda: _new_run_dir(Path(args.runs_dir)), resume=resume, git=git, price=price,
                         auto_approve=args.yes, stream=args.stream).run()

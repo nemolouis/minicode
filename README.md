@@ -17,7 +17,7 @@
 
 | 部分 | 状态 | 说明 |
 |---|---|---|
-| M1 agent 主循环与工具 | 完成 | 见 [docs/features.md](docs/features.md)；全仓库 729 个测试（不调用模型；需要 Docker 的测试在没有 Docker 时自动跳过，当前环境 696 通过、33 跳过；分支覆盖率约 84%） |
+| M1 agent 主循环与工具 | 完成 | 见 [docs/features.md](docs/features.md)；全仓库 781 个测试（不调用模型；需要 Docker 的测试在没有 Docker 时自动跳过，当前环境 748 通过、33 跳过） |
 | M2 评测 harness | 完成 | 任务集、dev/test 划分、隐藏测试、规则化判分、配对对比、断点续跑；实验结果见 [docs/eval.md](docs/eval.md)；test 集未跑 |
 | M3 轨迹回放 | 完成 | `miniagent-eval view`：浏览所有运行、逐步回放、两次运行并排对比；未做按条件导出轨迹 |
 | M4 MCP server | 完成 | 手写的 MCP 笔记服务器 + 客户端（stdio 和 Streamable HTTP）+ 越界/越权测试（见 [docs/mcp-and-service.md](docs/mcp-and-service.md)）；已用官方 `mcp` SDK 2.3.0 做双向互操作检查（17/17，见 `scripts/mcp_interop.py`） |
@@ -60,32 +60,20 @@ miniagent "修复 stats.py 里 moving_average 的 bug" -w path/to/repo -m <model
 
 常用参数：`--max-steps`、`-y`（自动批准写/改/命令，黑名单仍生效）、`--context-limit`（调低可触发压缩）、`--keep-recent`。
 
-**不带任务就是交互式终端客户端**（多轮对话、流式输出、编辑前先看 diff、`/diff` `/undo` `/rewind` `/cost` 等）：
+**不带任务就是全屏终端界面**（类似 Claude Code / opencode 的体验：对话流、流式 Markdown、可折叠的工具调用卡片、带 diff 的审批面板、侧栏任务与改动、`/` 命令菜单）：
 
 ```bash
-miniagent -w path/to/repo -m <model> --stream --git --sandbox auto
+pip install -e ".[tui]"                       # 界面用 Textual，是可选依赖；核心 agent 仍然零依赖
+miniagent -w path/to/repo -m <model> --git --sandbox auto
 ```
 
-下面是真实的终端会话（模型是本地的脚本化假服务器，用来驱动真实的客户端、流式解析和确认流程，**不是真实模型的回答**）：
+![对话：工具调用卡片、diff、Markdown、侧栏](docs/img/tui-conversation.svg)
 
-```
-miniagent  fake  /tmp/proj
-miniagent> create hello.py that prints hi
-  needs your approval:
-    create hello.py (1 lines)
-    +print('hi')
-  allow? [y]es / [n]o / [a]ll (rest of this session): y
-  ✓ write_file hello.py
-I created hello.py.
-[done] 2 steps total, 200 in / 20 out tokens, 3.1s
-miniagent> /diff
---- /dev/null
-+++ b/hello.py
-@@ -0,0 +1 @@
-+print('hi')
-miniagent> /undo
-rewound to the start of step 3: 0 file(s) restored, 0 removed; the next message continues from there
-```
+![改文件前的审批：先看 diff，y 允许 / a 本次会话都允许 / n 拒绝](docs/img/tui-approval.svg)
+
+（截图由无头的 Textual 渲染，模型是脚本化的，**不是真实模型的回答**；界面本身是真实的。）
+
+中文等输入法：界面默认关闭 Textual 的 kitty 键盘协议（它会让 iTerm2 丢掉输入法提交的文字）；仍有问题就用 `--ui repl`。按键：`enter` 发送，`ctrl+j` 换行，`↑/↓` 翻历史，`tab` 补全 `/` 命令，`esc` 或 `ctrl+c` 打断当前这一轮（空闲时连按两次 `ctrl+c` 退出），`ctrl+b` 开关侧栏，`ctrl+d` 退出。没装 Textual、或不是在终端里，自动退回逐行的 REPL；也可以用 `--ui repl|tui` 指定。
 
 ## 文档
 

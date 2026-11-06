@@ -71,6 +71,7 @@ class Workspace:
         self.require_read = require_read
         self.diagnostics = diagnostics
         self.seen: set[Path] = set()        # files the model has read or written in this run (resolved paths)
+        self.cancel = None                      # a threading.Event set by the agent: a running command is killed when it is set
         self.output_limit = MAX_OUTPUT_CHARS   # characters per tool output; the agent lowers it as the context fills (output_budget)
         if not self.root.is_dir():
             raise ValueError(f"workspace is not a directory: {self.root}")
@@ -195,8 +196,10 @@ class Workspace:
         if self.sandbox is not None:
             r = self.sandbox.exec(cmd, timeout=timeout)
         else:
-            r = run_shell(cmd, shell=True, cwd=self.root, timeout=timeout,
+            r = run_shell(cmd, shell=True, cwd=self.root, timeout=timeout, cancel=self.cancel,
                           env={**os.environ, "GIT_PAGER": "cat", "PAGER": "cat"})
+        if getattr(r, "cancelled", False):
+            raise ToolError("command stopped by the user")
         if r.timed_out:
             raise ToolError(f"command timed out after {timeout}s")
         return truncate(f"exit code: {r.returncode}\n{r.stdout}{r.stderr}".rstrip(), self.output_limit,

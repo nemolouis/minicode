@@ -30,6 +30,10 @@ Do not edit tests to make them pass. Paths are relative to the workspace root, a
 When you are done, reply with a short summary of what you changed and the test result, \
 and make no further tool calls."""
 
+class CancelledByUser(KeyboardInterrupt):
+    """Raised inside run() when cancel() was called from another thread. A KeyboardInterrupt, so it takes the same graceful path as Ctrl-C."""
+
+
 @dataclass
 class RunResult:
     status: str  # done | max_steps | length | error
@@ -114,6 +118,24 @@ class Agent:
             tools["explore"] = explore_tool(self)
         self.tools: dict[str, Tool] = {n: t for n, t in tools.items() if n not in self.disabled_tools}
         self._recorder: Recorder | None = None             # set by run()
+        self.cancel_event = threading.Event()              # set by cancel(), possibly from another thread (the terminal UI)
+        self.workspace.cancel = self.cancel_event
+
+    def cancel(self) -> None:
+        """Ask the run to stop at the next safe point: before the next request, while a reply is streaming, while a shell command runs,
+        between tool turns. run() then ends with status "interrupted" and a session that can be resumed, exactly as after Ctrl-C."""
+        self.cancel_event.set()
+
+    def _guard(self, callback):
+        """`callback` for streamed text that aborts the stream (raising CancelledByUser) once cancel() was called."""
+        def guarded(piece: str) -> None:
+            self._check_cancel()
+            callback(piece)
+        return guarded
+
+    def _check_cancel(self) -> None:
+        if self.cancel_event.is_set():
+            raise CancelledByUser
 
     def add_sub_usage(self, input_tokens: int, output_tokens: int) -> None:
         with self._usage_lock:
@@ -125,6 +147,7 @@ class Agent:
         """Run `task`. With `resume` (a state from miniagent.session.load_session) the earlier conversation is continued:
         `task` is added as a new user message and step numbers go on from where the session stopped."""
         base = resume["step"] if resume else 0
+        self.cancel_event.clear()
         if resume:
             messages: list[dict] = list(resume["messages"]) + [{"role": "user", "content": task}]
             self.todos = list(resume.get("todos", []))
@@ -147,9 +170,10 @@ class Agent:
         awaiting_floor = False
         final_text = ""
         status = "max_steps"
-        step = completed = base            # `completed`: the last step whose turn (model call + all its tool results) finished
+        step = completed = logged = base   # `completed`: last step whose turn finished; `logged`: last step whose model_call is in the trajectory
         try:
             for step in range(base + 1, base + self.max_steps + 1):
+                self._check_cancel()
                 if self.budget and (why := self._over_budget(spent)):
                     self.trajectory.log("budget", step=step, reason=why, **self._spent_summary(spent))
                     status = "budget"
@@ -163,6 +187,8 @@ class Agent:
                 rec.begin_step(step, len(messages), self.todos)
 
                 resp, calls = self._model_step(step, messages)
+                logged = step
+                self._check_cancel()
                 last_input = resp.usage["input_tokens"]
                 if awaiting_floor:
                     floor, awaiting_floor = last_input, False
@@ -193,6 +219,7 @@ class Agent:
                     messages.extend(results)
                     completed = step
                     rec.save(messages, step, last_input, self.todos)
+                    self._check_cancel()
                     if stop_stuck:
                         status = "stuck"
                         break
@@ -205,6 +232,7 @@ class Agent:
             # tool calls have no results; the API rejects such a history, so every unanswered call gets an explicit note.
             closed = _close_dangling_calls(messages)
             done_step = step if closed is not messages else completed     # notes were needed: the turn of `step` was cut in the middle
+            done_step = max(done_step, logged)                            # a request that was answered is in the log even if its reply was dropped
             messages = closed
             rec.save(messages, done_step, last_input, self.todos)
             self.trajectory.log("run_end", status="interrupted", steps=done_step, input_tokens=in_tok, output_tokens=out_tok,
@@ -285,7 +313,7 @@ class Agent:
     def _model_step(self, step: int, messages: list[dict]) -> tuple[ModelResponse, list[dict]]:
         """One model request; logs the `model_call` event. Returns the response and its parsed tool calls."""
         t0 = time.time()
-        extra = {"on_text": self.on_text} if self.on_text is not None else {}
+        extra = {"on_text": self._guard(self.on_text)} if self.on_text is not None else {}
         resp: ModelResponse = self.client.chat(
             model=self.model, max_tokens=self.max_tokens, system=self.system,
             tools=[t.spec() for t in self.tools.values()], messages=messages, temperature=self.temperature, **extra)
