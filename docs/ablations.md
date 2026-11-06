@@ -61,8 +61,32 @@ no-grep has 3 valid runs (all passed), no-verify-prompt has none. They are repor
 passes. The harness now treats HTTP 402 as a permanent error and stops the batch instead of running the
 remaining jobs.
 
+## Feature arms on flash (2026-11-06): todo, explore, require_read, diagnostics, permissions
+Baseline `flash` and five single-feature configs, B-layer dev 13 tasks x 3 (`scripts/run_feature_evals.sh`, results in
+`results/20261106-120253-*`). Predictions are in each config's `hypothesis`.
+
+| arm | passes /39 | mean steps | feature actually used |
+|---|---|---|---|
+| baseline | 35 | 8.6 | - |
+| todo | 39 | 11.7 | todo_write in 1 of 39 runs |
+| explore | 39 | 10.5 | explore in 0 of 39 runs |
+| require_read | 34 | 9.7 | 3 edits blocked |
+| diagnostics | 36 | 8.6 | 0 warnings |
+| permissions | 38 | 10.2 | 5 allow matches, 0 denies |
+
+- Fisher exact vs baseline: todo and explore p=0.115, permissions 0.36, diagnostics and require_read 1.0. Nothing is significant.
+- The two arms with the largest gain are the two where the feature was essentially not used, so the gain cannot come from the
+  feature. This is the first direct look at the baseline's own noise: an almost inert arm differs from baseline by 4 passes.
+  Differences under ~10 points are not detectable on this task set.
+- Predictions wrong: todo mean steps +3.1 (predicted +0-2); explore pass rate +10.3 (predicted within +-8; not caused by explore);
+  require_read mean steps +1.1 (predicted <1). The explore cost prediction (+10-40% total) was not tested: no sub-agent ran;
+  the +24% cost came from more steps.
+- Concurrency saved 0.05 s of 444 s tool time in the baseline (30 concurrent groups): irrelevant on small repos.
+- Argument validation never fired (0 invalid calls in 234 runs): flash does not send malformed arguments.
+- Open: features aimed at weak models (require_read, todo, explore) need a weak model to be tested; flash does not exercise them.
+
 ## Caveats
 - 13 tasks x 3 repeats is a small sample and the baseline is near the ceiling (90%): differences of 5-8 points are
   within what a repeat of the same condition could show. Only the ctx3k step/token blow-up is unambiguous.
-- There is no replicate of the baseline on this exact task set, so the run-to-run noise of the baseline itself is
-  not measured directly.
+- There is still no true replicate of the baseline on this exact task set; the feature-arm run above gives only an
+  indirect estimate of the noise (an almost inert arm differed by 4 of 39 passes).

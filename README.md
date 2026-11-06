@@ -59,7 +59,7 @@
 - **HTTP 服务**（可选，`miniagent/server.py`，见"HTTP 服务"）：把 `Agent.run` 包成 FastAPI 接口，路径白名单、在拷贝上运行、bash 只进沙箱、默认只监听本机。
 - **模型接入**：标准库实现，无第三方 SDK。两种协议：OpenAI 兼容的 chat completions（DeepSeek、智谱 GLM 已验证）和 **Gemini 原生 `generateContent`**（含思考签名的保存与回放，可经转发型中转使用）。配置文件里用 `base_url` / `base_url_env` / `api_key_env` / `extra_body` / `api_style` 指定，密钥永远从环境变量读
 
-**尚未实现**（避免误解）：按条件导出轨迹到网页之外的格式（SFT 导出已有，见上）；和主流 coding agent 相比还缺交互界面（TUI / 流式 / 中途打断）、hooks / skills / 插件、git 集成（分支 / 提交 / PR）、真正的 LSP 与符号索引（只有改后的语法检查）、Anthropic 原生协议、plan 模式（只有 todo 工具）、MCP 的 OAuth / resources / prompts。**本节新增的所有功能（校验、并行、memory、todo、explore、先读后改、诊断、权限、会话）只有单元测试和变异检验，还没有用真实模型在 dev 集上评测过**（没有 API 密钥），`configs/feat-*.json` 里写好了运行前的预测，一条命令 `scripts/run_feature_evals.sh` 即可全部跑完，见"可选功能的评测计划"。
+**尚未实现**（避免误解）：按条件导出轨迹到网页之外的格式（SFT 导出已有，见上）；和主流 coding agent 相比还缺交互界面（TUI / 流式 / 中途打断）、hooks / skills / 插件、git 集成（分支 / 提交 / PR）、真正的 LSP 与符号索引（只有改后的语法检查）、Anthropic 原生协议、plan 模式（只有 todo 工具）、MCP 的 OAuth / resources / prompts。**本节新增的功能有单元测试和变异检验；其中 todo / explore / 先读后改 / 诊断 / 权限在 flash 上做过一次评测，但几乎没被触发，结果在噪声内（见"可选功能的评测结果"）；memory 和会话恢复/回退没有用真实模型评测过。**
 
 ## 快速开始
 
@@ -269,17 +269,27 @@ python3 -m venv .venv-mlx && .venv-mlx/bin/pip install --only-binary :all: mlx-l
 
 两者都只比基线多 1 题（赢 3 输 2），**在 13 题 × 1 次的样本下无法与噪声区分**；单次运行的噪声已经与这个差距相当。
 
-### 可选功能的评测计划（尚未运行）
+### 可选功能的评测结果（flash，B 层 dev 13 题 × 3 次，2026-11-06）
 
-`configs/feat-todo-flash.json`、`feat-explore-flash.json`、`feat-readfirst-flash.json`、`feat-diag-flash.json`、`feat-perms-flash.json`、`feat-todo-g35.json` 各只打开一个功能，预测写在 `hypothesis` 里（运行前写的）：flash 已接近天花板（约 90%），13 题 × 3 次下预计通过率变化在 ±8 点内、检测不到；`explore` 预计让父 agent 的输入 token 降而总成本升 10–40%（子 agent 要重新读文件）；`todo` 在 Gemini 弱模型上预计不改变"假完成"。跑完后若预测被推翻就照实记在 `docs/ablations.md`。校验和并行不改变模型看到的内容（除了参数错误时的报错文字），只会影响工具耗时，用 `--no-validate` / `--no-parallel` 做对照即可。
+`scripts/run_feature_evals.sh` 跑了基线和五个配置（每个只打开一个功能），39 次运行/配置，无 API 失败。预测是运行前写在各配置 `hypothesis` 里的。
 
-```bash
-miniagent-eval run --config configs/feat-explore-flash.json --split dev --tasks b --repeat 3 --workers 4
-miniagent-eval compare results/<baseline-run> results/<feat-run>
-scripts/run_feature_evals.sh        # 基线 + 五个 flash 配置，各 13 题 × 3 次，约 $1~2；需要 DEEPSEEK_API_KEY
-```
+| 配置 | 通过（次） | 步数 | 输入 token | 成本/次(低谷价) | 功能实际触发 |
+|---|---|---|---|---|---|
+| flash（基线） | 35/39 | 8.6 | 59.7k | $0.0056 | – |
+| + todo | 39/39 | 11.7 | 126k | $0.0073 | `todo_write` 只在 **1/39** 次运行里被调用 |
+| + explore | 39/39 | 10.5 | 110k | $0.0070 | `explore` **0/39** 次（只有 `glob` 在 7 次里用过） |
+| + require_read | 34/39 | 9.7 | 107k | $0.0071 | 拦截了 3 次编辑 |
+| + diagnostics | 36/39 | 8.6 | 59.5k | $0.0057 | 0 次警告 |
+| + permissions | 38/39 | 10.2 | 103k | $0.0069 | 5 次命中 allow，0 次 deny |
 
-`require_read` 和 `diagnostics` 是为弱模型设计的（学生模型 94 次编辑里 76 次的 `old_string` 是凭空写的），flash 几乎不会触发，预计看不出差别，所以它们在 flash 上的结果只能说明"没有伤害"，不能说明"有用"。
+**结论：这批数据不能证明任何功能有效或有害。** todo 和 explore 看起来"提升"了 10 个点（Fisher p=0.115，不显著），但这两个功能几乎没被模型使用，所以那 4 次通过不能归功于它们；一个几乎没起作用的配置与基线差 4 次，说明在这个任务集上 DeepSeek 在温度 0 下的运行间波动本身就有这么大——这是第一次直接量到的噪声下限，通过率差异在 10 个点以内都无法区分。需要补一句：功能配置的步数分布尾巴更长（最大 26–42 步，基线最大 19），但我没有证据说明这是功能造成的还是 API 的波动。
+
+预测核对：
+- **对了**：todo 使用率 <50%（1/39）；explore 使用率 <40%（0/39）；diagnostics 警告 <10%（0）；permissions 的 `tampered_tests` 为 0（基线也是 0）；require_read、diagnostics、permissions 的通过率差在 ±8 点内（-2.6 / +2.6 / +7.7，后者勉强）。
+- **错了**：todo 步数"多 0–2"实际多 3.1；explore 通过率"±8 点内"实际 +10.3（但功能没触发，不是功能的效果）；require_read 步数"变化 <1"实际 +1.1。
+- **没验证到**：explore 的 token 预测（父输入降、总成本升 10–40%）——子 agent 一次都没被调用，成本上升（+24%）来自步数增加，不是子 agent。
+
+其他实测事实：并行默认开启，基线里 30 组并发调用共省下 0.05 秒（工具总耗时 444 秒，模型延迟 3598 秒），所以并行对这类小仓库的墙钟时间没有意义，价值只在大仓库或慢工具上，这里没测；参数校验在 39 × 6 次运行中一次都没触发（flash 不会传错参数）。**真正该测这些功能的是弱模型**（Gemini 3.1-flash-lite 的假完成、学生模型的凭空 `old_string`），那需要额度或本地推理，没做。
 
 ## 目录结构
 
@@ -356,7 +366,8 @@ agent 会执行模型生成的命令，存在风险：
 - [ ] 已决定不做（下层 2026-10-28 收工，理由见 docs/next_phase_plan.md 末尾）：数据消融、一次 test、对照实验(只改 Adam 偏差修正)、切窗训练
 - [x] 对标主流 coding agent 补缺口：参数校验、并行只读工具、`AGENTS.md` 记忆、todo 工具、只读 explore 子 agent、glob（有测试和变异检验；**真实模型评测未跑**）
 - [x] 先读后改、改后诊断、权限规则、会话恢复/回退、MCP Streamable HTTP 客户端（有测试和变异检验）
-- [ ] 上述所有功能在 dev 集上的评测（`scripts/run_feature_evals.sh`，需要 API 额度；这一步没做）；顺带跑一次 test 集
+- [x] 上述功能在 flash 上的 dev 评测（见"可选功能的评测结果"）：功能几乎没被触发，结果在噪声内
+- [ ] 在弱模型上评测先读后改 / todo / explore（flash 上无信息量）；跑一次 test 集
 - [ ] 上下文工程(可选):摘要 vs 结构化笔记
 
 ## 许可证
