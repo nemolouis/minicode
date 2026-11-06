@@ -33,6 +33,38 @@ def _make_confirm(auto: bool):
     return confirm
 
 
+def _repo_relative(root: Path, paths: list[str]) -> list[str]:
+    """`exclusions()` gives paths relative to the workspace; git wants them relative to the repository's top level."""
+    import subprocess
+    top = subprocess.run(["git", "-C", str(root), "rev-parse", "--show-toplevel"], capture_output=True, text=True)
+    if top.returncode != 0:
+        return paths
+    prefix = root.relative_to(Path(top.stdout.strip()).resolve()).as_posix()
+    return [p if prefix == "." else f"{prefix}/{p}" for p in paths]
+
+
+class SandboxUnavailable(Exception):
+    pass
+
+
+def _make_sandbox(kind: str | None, workspace: str):
+    """A context manager yielding the sandbox object (or None) for `--sandbox KIND`."""
+    if not kind:
+        return nullcontext()
+    from . import localsandbox
+    from .sandbox import Sandbox, available
+    if kind == "auto":
+        kind = localsandbox.kind() or "docker"
+    if kind in ("seatbelt", "bwrap"):
+        have = localsandbox.kind()
+        if have != kind:
+            raise SandboxUnavailable(f"--sandbox {kind} is not available on this machine" + (f" (this one has: {have})" if have else ""))
+        return localsandbox.LocalSandbox(workspace, mechanism=kind)
+    if not available():
+        raise SandboxUnavailable("the sandbox image is missing or Docker is not running (build it with: miniagent-eval sandbox-build)")
+    return Sandbox(workspace)
+
+
 def _printer():
     def show(text: str) -> None:
         print(text, end="", flush=True)
@@ -74,6 +106,10 @@ def main(argv=None) -> int:
     ap.add_argument("--stuck-warn", type=int, default=0, metavar="N",
                     help="after N identical calls with identical results in a row, tell the model (0 = off); the run stops at --stuck-stop")
     ap.add_argument("--stuck-stop", type=int, default=6, metavar="N", help="end the run with status 'stuck' after N such repeats")
+    ap.add_argument("--git", action="store_true", help="work on a new branch miniagent/<run> and commit after every step that changed files "
+                    "(needs a git repository with a clean tree; nothing is pushed)")
+    ap.add_argument("--api-style", choices=["openai", "anthropic", "gemini"], default=None,
+                    help="wire protocol (default openai-compatible, key from LLM_API_KEY / DEEPSEEK_API_KEY; anthropic: ANTHROPIC_API_KEY)")
     ap.add_argument("--stream", action="store_true", help="print the model's reply as it is generated (OpenAI-compatible endpoints)")
     ap.add_argument("--output-budget", action="store_true", help="shrink the size of one tool output as the context fills up")
     ap.add_argument("--max-cost", type=float, help="stop before the request that would exceed this many USD (needs a price in --prices)")
@@ -81,7 +117,10 @@ def main(argv=None) -> int:
     ap.add_argument("--prices", default="configs/prices.json", help="price table used for --max-cost")
     ap.add_argument("--no-parallel", action="store_true", help="run tool calls one at a time")
     ap.add_argument("--no-validate", action="store_true", help="do not check tool arguments against their schemas")
-    ap.add_argument("--sandbox", action="store_true", help="run bash in a Docker container (no network, read-only root, only the workspace mounted)")
+    ap.add_argument("--sandbox", nargs="?", const="docker", choices=["docker", "seatbelt", "bwrap", "auto"], metavar="KIND",
+                    help="run bash in a sandbox: docker (default if no KIND: no network, read-only root, only the workspace mounted), "
+                         "seatbelt (macOS) or bwrap (Linux): OS-level, no Docker needed, writes only in the workspace and no network, but the "
+                         "rest of the disk stays readable except credential folders; auto = the OS one if this machine has it, else docker")
     ap.add_argument("--runs-dir", default="runs")
     args = ap.parse_args(argv)
 
@@ -95,8 +134,9 @@ def main(argv=None) -> int:
             print(f"error: {e}", file=sys.stderr)
             return 2
         return 0
-    if not args.task:
-        ap.error("a task is required (except with --rewind)")
+    interactive = not args.task
+    if interactive and args.no_session:
+        ap.error("the interactive client keeps its conversation in session files: drop --no-session (or give a task for a one-shot run)")
     resume = None
     if args.resume:
         from .session import load_session
@@ -115,7 +155,7 @@ def main(argv=None) -> int:
         return 2
 
     try:
-        client = ChatClient()
+        client = ChatClient(api_style=args.api_style) if args.api_style else ChatClient()
     except APIError as e:
         print(f"error: {e}", file=sys.stderr)
         return 2
@@ -140,23 +180,50 @@ def main(argv=None) -> int:
 
     run_dir = Path(args.resume) if args.resume else _new_run_dir(Path(args.runs_dir))
     servers = json.loads(Path(args.mcp_config).read_text()) if args.mcp_config else []
-    from .sandbox import Sandbox, available
-    if args.sandbox and not available():
-        print("error: the sandbox image is missing or Docker is not running (build it with: miniagent-eval sandbox-build)", file=sys.stderr)
+    try:
+        sandbox_cm = _make_sandbox(args.sandbox, args.workspace)
+    except SandboxUnavailable as e:
+        print(f"error: {e}", file=sys.stderr)
         return 2
-    with mcp_session(servers) as mcp_tools, (Sandbox(args.workspace) if args.sandbox else nullcontext()) as sb:
-        agent = Agent(
-            client=client, model=args.model, workspace=Workspace(args.workspace, sandbox=sb, require_read=args.require_read, diagnostics=args.diagnostics),
-            confirm=_make_confirm(args.yes), trajectory=Trajectory(run_dir), max_steps=args.max_steps,
-            context_limit=args.context_limit, keep_recent=args.keep_recent, compact_regrowth=args.compact_regrowth,
-            temperature=args.temperature, extra_tools=mcp_tools,
-            features=tuple(f for f in args.features.split(",") if f), parallel_tools=not args.no_parallel,
-            validate_args=not args.no_validate, permissions=permissions, session=not args.no_session,
-            stuck_warn_after=args.stuck_warn, stuck_stop_after=args.stuck_stop, budget=budget,
-            output_budget=args.output_budget, on_text=_printer() if args.stream else None,
-            disabled_tools=tuple(t for t in args.disable_tools.split(",") if t),
-        )
-        res = agent.run(args.task, resume=resume)
+    with mcp_session(servers) as mcp_tools, sandbox_cm as sb:
+        git = None
+        if args.git:
+            from .gitwork import GitError, GitSession
+            from .session import exclusions
+            root = Path(args.workspace).resolve()
+            git = GitSession(root, run_dir.name, exclude=_repo_relative(root, exclusions(root, run_dir.resolve())))
+            try:
+                info = git.start()
+            except GitError as e:
+                print(f"error: --git: {e}", file=sys.stderr)
+                return 2
+            print(f"git: working on branch {info['branch']}" + (" (continued)" if info["reused"] else f" (from {info['base_branch']})"), file=sys.stderr)
+        workspace = Workspace(args.workspace, sandbox=sb, require_read=args.require_read, diagnostics=args.diagnostics)
+
+        def make_agent(trajectory=None, on_text=None, confirm=None) -> Agent:
+            return Agent(
+                client=client, model=args.model, workspace=workspace,
+                confirm=confirm or _make_confirm(args.yes), trajectory=trajectory or Trajectory(run_dir), max_steps=args.max_steps,
+                context_limit=args.context_limit, keep_recent=args.keep_recent, compact_regrowth=args.compact_regrowth,
+                temperature=args.temperature, extra_tools=mcp_tools,
+                features=tuple(f for f in args.features.split(",") if f), parallel_tools=not args.no_parallel,
+                validate_args=not args.no_validate, permissions=permissions, session=not args.no_session,
+                stuck_warn_after=args.stuck_warn, stuck_stop_after=args.stuck_stop, budget=budget,
+                output_budget=args.output_budget, on_text=on_text or (_printer() if args.stream else None), git=git,
+                keep_background=interactive, disabled_tools=tuple(t for t in args.disable_tools.split(",") if t),
+            )
+
+        if interactive:
+            from .repl import Repl, Terminal
+            price = None
+            try:
+                price = (json.loads(Path(args.prices).read_text()).get(args.model) or {}).get("off_peak")
+            except (OSError, ValueError):
+                pass
+            return Repl(make_agent=make_agent, run_dir=run_dir, workspace=Path(args.workspace), term=Terminal(),
+                        new_run_dir=lambda: _new_run_dir(Path(args.runs_dir)), resume=resume, git=git, price=price,
+                        auto_approve=args.yes, stream=args.stream).run()
+        res = make_agent().run(args.task, resume=resume)
     print(f"\n=== {res.status} | {res.steps} steps | {res.input_tokens} in / {res.output_tokens} out tokens ===")
     if not args.stream:                              # with --stream the text has already been printed as it arrived
         print(res.final_text)
@@ -164,6 +231,8 @@ def main(argv=None) -> int:
         print(f"interrupted; continue with: miniagent \"<next instruction>\" -w {args.workspace} --resume {run_dir}")
         print(f"trajectory: {run_dir / 'trajectory.jsonl'}")
         return 130
+    if git is not None:
+        print(git.summary())
     print(f"trajectory: {run_dir / 'trajectory.jsonl'}")
     return 0 if res.status == "done" else 1
 

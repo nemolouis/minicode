@@ -84,6 +84,10 @@ class Agent:
     output_budget: bool = False
     # Called with each piece of reply text as it streams in (OpenAI-compatible clients only); None = no streaming.
     on_text: Callable[[str], None] | None = None
+    # A started miniagent.gitwork.GitSession: one commit per tool turn that changed files, on the agent's own branch.
+    git: object | None = None
+    # Leave background jobs running when run() returns (the interactive client keeps one agent across turns and stops them on exit).
+    keep_background: bool = False
 
     def __post_init__(self):
         bad = set(self.features) - FEATURES
@@ -184,6 +188,8 @@ class Agent:
                     stop_stuck = False
                     if stuck:
                         stop_stuck = self._check_stuck(stuck, step, calls, results, executor.last_results)
+                    if self.git is not None:
+                        self._git_commit(step, calls)
                     messages.extend(results)
                     completed = step
                     rec.save(messages, step, last_input, self.todos)
@@ -209,7 +215,7 @@ class Agent:
                                 input_tokens=in_tok, output_tokens=out_tok, final_text=final_text)
             return RunResult("error", step, final_text, in_tok, out_tok, repr(e))
         finally:
-            if self.background is not None:
+            if self.background is not None and not self.keep_background:
                 self.background.kill_all()          # no job outlives the run
 
         in_tok += self.sub_usage["input"]
@@ -243,6 +249,16 @@ class Agent:
     def _over_budget(self, spent: dict) -> str | None:
         s = self._spent_summary(spent)
         return self.budget.exceeded(s["spent_tokens"], s.get("spent_usd"))
+
+    def _git_commit(self, step: int, calls: list[dict]) -> None:
+        summary = ", ".join(sorted({c["name"] for c in calls})) or "tools"
+        try:
+            made = self.git.commit_step(step, summary)
+        except Exception as e:                           # a git problem must not end the run; it is recorded
+            self.trajectory.log("git_commit", step=step, sha="", files=[], error=str(e)[:300])
+            return
+        if made:
+            self.trajectory.log("git_commit", step=step, sha=made["sha"], files=made["files"])
 
     def _system_sha1(self) -> str:
         return hashlib.sha1(self.system.encode()).hexdigest()[:12]

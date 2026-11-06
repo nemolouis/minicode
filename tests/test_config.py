@@ -37,7 +37,7 @@ def test_missing_and_empty_required_keys():
 @pytest.mark.parametrize("kw", [
     {"max_steps": "50"}, {"max_steps": 0}, {"max_steps": True}, {"temperature": "0"}, {"temperature": 3}, {"require_read": "yes"},
     {"require_read": 1}, {"features": ["todo", "telepathy"]}, {"features": "todo"}, {"disabled_tools": ["bsah"]},
-    {"api_style": "anthropic"}, {"base_url": "api.example.com"}, {"permissions": {"allw": []}}, {"permissions": {"allow": ["bad rule("]}},
+    {"api_style": "claude"}, {"base_url": "api.example.com"}, {"permissions": {"allw": []}}, {"permissions": {"allow": ["bad rule("]}},
     {"api_retries": -1}, {"compact_regrowth": -0.5}, {"extra_body": []}, {"mcp_servers": [{"name": "x"}]},
     {"base_url": "https://a", "base_url_env": "X"},
 ])

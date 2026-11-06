@@ -17,7 +17,7 @@
 
 | 部分 | 状态 | 说明 |
 |---|---|---|
-| M1 agent 主循环与工具 | 完成 | 见 [docs/features.md](docs/features.md)；全仓库 637 个测试（不调用模型；需要 Docker 的测试在没有 Docker 时自动跳过，当前环境 604 通过、33 跳过） |
+| M1 agent 主循环与工具 | 完成 | 见 [docs/features.md](docs/features.md)；全仓库 729 个测试（不调用模型；需要 Docker 的测试在没有 Docker 时自动跳过，当前环境 696 通过、33 跳过；分支覆盖率约 84%） |
 | M2 评测 harness | 完成 | 任务集、dev/test 划分、隐藏测试、规则化判分、配对对比、断点续跑；实验结果见 [docs/eval.md](docs/eval.md)；test 集未跑 |
 | M3 轨迹回放 | 完成 | `miniagent-eval view`：浏览所有运行、逐步回放、两次运行并排对比；未做按条件导出轨迹 |
 | M4 MCP server | 完成 | 手写的 MCP 笔记服务器 + 客户端（stdio 和 Streamable HTTP）+ 越界/越权测试（见 [docs/mcp-and-service.md](docs/mcp-and-service.md)）；已用官方 `mcp` SDK 2.3.0 做双向互操作检查（17/17，见 `scripts/mcp_interop.py`） |
@@ -59,6 +59,33 @@ miniagent "修复 stats.py 里 moving_average 的 bug" -w path/to/repo -m <model
 ```
 
 常用参数：`--max-steps`、`-y`（自动批准写/改/命令，黑名单仍生效）、`--context-limit`（调低可触发压缩）、`--keep-recent`。
+
+**不带任务就是交互式终端客户端**（多轮对话、流式输出、编辑前先看 diff、`/diff` `/undo` `/rewind` `/cost` 等）：
+
+```bash
+miniagent -w path/to/repo -m <model> --stream --git --sandbox auto
+```
+
+下面是真实的终端会话（模型是本地的脚本化假服务器，用来驱动真实的客户端、流式解析和确认流程，**不是真实模型的回答**）：
+
+```
+miniagent  fake  /tmp/proj
+miniagent> create hello.py that prints hi
+  needs your approval:
+    create hello.py (1 lines)
+    +print('hi')
+  allow? [y]es / [n]o / [a]ll (rest of this session): y
+  ✓ write_file hello.py
+I created hello.py.
+[done] 2 steps total, 200 in / 20 out tokens, 3.1s
+miniagent> /diff
+--- /dev/null
++++ b/hello.py
+@@ -0,0 +1 @@
++print('hi')
+miniagent> /undo
+rewound to the start of step 3: 0 file(s) restored, 0 removed; the next message continues from there
+```
 
 ## 文档
 
@@ -153,6 +180,7 @@ agent 会执行模型生成的命令，存在风险：
 - [x] 上述功能在 flash 上的 dev 评测（见 [docs/eval.md](docs/eval.md) 的"可选功能的评测结果"）：功能几乎没被触发，结果在噪声内
 - [x] 工程化（2026-11）：评测配置严格校验、运行溯源、轨迹格式版本与校验器、黄金轨迹回放回归、CI + ruff + Python 3.10–3.13、`agent.py` 拆分为主循环 / 执行器 / 压缩 / 会话、查看器认识新事件、results 索引；见 [docs/development.md](docs/development.md)
 - [x] 第二轮对标补缺（2026-11）：卡住检测、花费上限、`apply_patch`、输出分页与按上下文缩放的输出上限、后台命令、`symbols` 大纲、流式输出与 Ctrl-C 可恢复（有测试和变异检验；**没有用真实模型评测过**，见 [docs/features.md](docs/features.md)）
+- [x] 第三轮（2026-11）：`compare` 的按运行检验与噪声警告、噪声下限报告（`miniagent-eval noise`）、覆盖率进 CI、`--git` 分支与提交、不依赖 Docker 的系统沙箱（seatbelt / bwrap）、Anthropic 原生协议、**交互式终端客户端**（`miniagent` 不带任务）；有测试和变异检验，真实模型与真实 Anthropic / Linux bwrap 都**没有验证过**
 - [ ] 在弱模型上评测先读后改 / todo / explore（flash 上无信息量）；跑一次 test 集
 - [ ] 上下文工程(可选):摘要 vs 结构化笔记
 

@@ -3,7 +3,8 @@ since the last look, kill it. Three tools sit on top (see features.py): bash_bac
 
 Safety: the same deny-list as `bash`; the command runs in its own process group with the same minimal environment handling as `bash`
 (cwd = workspace root); output goes to a file outside the workspace, read in bounded chunks; at most MAX_JOBS jobs at a time; every
-job is killed when the run ends (and at interpreter exit). Not available with the Docker sandbox: a host process would defeat it."""
+job is killed when the run ends (and at interpreter exit). With an OS sandbox (seatbelt/bwrap) the job runs inside it; it is not
+available with the Docker sandbox, where a host process would defeat the point."""
 from __future__ import annotations
 
 import atexit
@@ -36,8 +37,9 @@ class Job:
 
 
 class BackgroundJobs:
-    def __init__(self, cwd: Path, env: dict | None = None):
-        self.cwd, self.env = Path(cwd), env
+    def __init__(self, cwd: Path, env: dict | None = None, argv_for=None):
+        """`argv_for(command)` -> the full argv that runs it inside an OS sandbox (miniagent.localsandbox); without it `sh -c` is used."""
+        self.cwd, self.env, self.argv_for = Path(cwd), env, argv_for
         self._dir = Path(tempfile.mkdtemp(prefix="miniagent-bg-"))
         self._jobs: dict[str, Job] = {}
         self._n = 0
@@ -52,8 +54,12 @@ class BackgroundJobs:
             job_id = f"job{self._n}"
             log = self._dir / f"{job_id}.log"
             f = log.open("wb")
-            proc = subprocess.Popen(command, shell=True, cwd=self.cwd, env=self.env, stdin=subprocess.DEVNULL, stdout=f,
-                                    stderr=subprocess.STDOUT, start_new_session=True)
+            if self.argv_for is not None:
+                proc = subprocess.Popen(self.argv_for(command), cwd=self.cwd, stdin=subprocess.DEVNULL, stdout=f,
+                                        stderr=subprocess.STDOUT, start_new_session=True)
+            else:
+                proc = subprocess.Popen(command, shell=True, cwd=self.cwd, env=self.env, stdin=subprocess.DEVNULL, stdout=f,
+                                        stderr=subprocess.STDOUT, start_new_session=True)
             f.close()                                   # the child keeps its own descriptor
             job = Job(job_id, command, proc, log)
             self._jobs[job_id] = job

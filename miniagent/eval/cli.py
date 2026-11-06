@@ -201,7 +201,7 @@ def cmd_run(a):
         client = None if replay_only else ChatClient(api_key=key, base_url=base_url, extra_body=cfg.get("extra_body"),
                             timeout=cfg.get("api_timeout", 120.0), retries=cfg.get("api_retries", 3),
                             tool_result_json=bool(cfg.get("tool_result_json", False)),
-                            api_style=cfg.get("api_style", "openai"),
+                            api_style=cfg.get("api_style", "openai"), prompt_cache=bool(cfg.get("prompt_cache", True)),
                             text_tool_calls=bool(cfg.get("text_tool_calls", False)))
     except APIError as e:
         raise SystemExit(f"error: {e}")
@@ -352,6 +352,21 @@ def cmd_compare(a):
     print(markdown_compare(ma["config"].get("name", a.a), mb["config"].get("name", a.b), compare(ra, rb)))
 
 
+def cmd_noise(a):
+    from .noise import NoiseError, markdown_noise, noise_report
+    try:
+        r = noise_report(a.dirs)
+    except NoiseError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+    text = markdown_noise(r)
+    print(text)
+    if a.out:
+        Path(a.out).write_text(text)
+        Path(a.out).with_suffix(".json").write_text(json.dumps(r, indent=2))
+    return 0
+
+
 def main(argv=None) -> int:
     # Make the venv's tools (pytest) visible to the agent's bash tool and to grading.
     os.environ["PATH"] = f"{Path(sys.executable).parent}{os.pathsep}{os.environ.get('PATH', '')}"
@@ -421,6 +436,10 @@ def main(argv=None) -> int:
     ex.add_argument("--splits", default="train", help="comma-separated splits to export (default: train; tasks without a split are 'none'). "
                     "Exporting dev or test tasks as training data voids the evaluation on them")
     ex.set_defaults(fn=cmd_export)
+    nz = sub.add_parser("noise", help="noise floor from replicate runs of one config (same tasks): how much do identical runs differ?")
+    nz.add_argument("dirs", nargs="+", help="result directories of the replicates")
+    nz.add_argument("--out", help="also write the report here (markdown) and next to it as .json")
+    nz.set_defaults(fn=cmd_noise)
     c = sub.add_parser("compare"); c.add_argument("a"); c.add_argument("b"); c.set_defaults(fn=cmd_compare)
     a = ap.parse_args(argv)
     return a.fn(a) or 0

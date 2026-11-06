@@ -75,9 +75,12 @@ def todo_tool(agent) -> Tool:
 def background_tools(agent) -> dict[str, Tool]:
     from .background import BackgroundJobs, JobError
     from .safety import check_command
-    if agent.workspace.sandbox is not None:
-        raise ValueError("the 'background' feature is not available with the Docker sandbox: a host process would defeat the sandbox")
-    jobs = agent.background = BackgroundJobs(agent.workspace.root, env={**os.environ, "GIT_PAGER": "cat", "PAGER": "cat"})
+    sb = agent.workspace.sandbox
+    if sb is not None and not hasattr(sb, "argv"):
+        raise ValueError("the 'background' feature is not available with the Docker sandbox: a host process would defeat the sandbox "
+                         "(an OS sandbox, --sandbox seatbelt|bwrap, works)")
+    jobs = agent.background = BackgroundJobs(agent.workspace.root, env={**os.environ, "GIT_PAGER": "cat", "PAGER": "cat"},
+                                             argv_for=getattr(sb, "argv", None))
 
     def start(args: dict) -> str:
         reason = check_command(args["command"])

@@ -20,6 +20,10 @@ import urllib.request
 from dataclasses import dataclass, field
 
 DEFAULT_BASE_URL = "https://api.deepseek.com"
+ANTHROPIC_BASE_URL = "https://api.anthropic.com"
+ANTHROPIC_VERSION = "2023-06-01"
+_ANTHROPIC_STOP = {"end_turn": "stop", "stop_sequence": "stop", "tool_use": "tool_calls", "max_tokens": "length",
+                   "refusal": "content_filter", "pause_turn": "stop"}
 _RETRY_STATUS = {429, 500, 502, 503, 504}
 
 
@@ -99,14 +103,20 @@ class ModelResponse:
 class ChatClient:
     def __init__(self, api_key: str | None = None, base_url: str | None = None,
                  timeout: float = 120, retries: int = 6, extra_body: dict | None = None,
-                 tool_result_json: bool = False, api_style: str = "openai", text_tool_calls: bool = False):
+                 tool_result_json: bool = False, api_style: str = "openai", text_tool_calls: bool = False,
+                 prompt_cache: bool = True):
+        if api_style not in ("openai", "gemini", "anthropic"):
+            raise APIError(f"unknown api_style {api_style!r}")
+        default = ANTHROPIC_BASE_URL if api_style == "anthropic" else DEFAULT_BASE_URL
         self.base_url = (base_url or os.environ.get("LLM_BASE_URL")
-                         or os.environ.get("DEEPSEEK_BASE_URL") or DEFAULT_BASE_URL).rstrip("/")
+                         or (None if api_style == "anthropic" else os.environ.get("DEEPSEEK_BASE_URL")) or default).rstrip("/")
         # DEEPSEEK_API_KEY is only a fallback for DeepSeek's own endpoint: falling back to it for an
         # arbitrary base_url (a relay, another vendor) would hand that third party the DeepSeek key.
         key = api_key or os.environ.get("LLM_API_KEY")
         if not key and "deepseek" in self.base_url:
             key = os.environ.get("DEEPSEEK_API_KEY")
+        if not key and "anthropic.com" in self.base_url:             # same rule: a vendor key only goes to that vendor's own host
+            key = os.environ.get("ANTHROPIC_API_KEY")
         if not key:
             raise APIError(f"no API key for {self.base_url}: set LLM_API_KEY (or pass api_key / api_key_env)")
         self.api_key = key
@@ -118,9 +128,9 @@ class ChatClient:
         self.tool_result_json = tool_result_json
         # "openai": POST {base}/chat/completions.  "gemini": the native generateContent protocol,
         # for relays that translate (and break) OpenAI-format tool calls: they forward native calls untouched.
-        if api_style not in ("openai", "gemini"):
-            raise APIError(f"unknown api_style {api_style!r}")
         self.api_style = api_style
+        # anthropic style only: mark the system prompt, the tool list and the newest message as cache breakpoints
+        self.prompt_cache = prompt_cache
         # read tool calls written as plain JSON in the reply text when the server returns none (see extract_text_tool_calls)
         self.text_tool_calls = text_tool_calls
         if api_style == "gemini" and "/v1" not in urllib.parse.urlparse(self.base_url).path:
@@ -134,8 +144,88 @@ class ChatClient:
         if self.api_style == "gemini":
             return self._chat_gemini(model=model, messages=messages, system=system, tools=tools,
                                      max_tokens=max_tokens, temperature=temperature)
+        if self.api_style == "anthropic":
+            return self._chat_anthropic(model=model, messages=messages, system=system, tools=tools, max_tokens=max_tokens,
+                                        temperature=temperature, on_text=on_text)
         return self._chat_openai(model=model, messages=messages, system=system, tools=tools,
                                  max_tokens=max_tokens, temperature=temperature, on_text=on_text)
+
+    # ------------------------------------------------------------------ Anthropic native (Messages API)
+    @staticmethod
+    def _to_anthropic_messages(messages: list[dict]) -> list[dict]:
+        """OpenAI-shaped history -> Messages API: assistant tool calls become `tool_use` blocks, the tool messages that follow become
+        ONE user message of `tool_result` blocks, and consecutive user messages are merged (roles must alternate)."""
+        out: list[dict] = []
+
+        def add(role: str, blocks: list[dict]) -> None:
+            if out and out[-1]["role"] == role:
+                out[-1]["content"] += blocks
+            else:
+                out.append({"role": role, "content": list(blocks)})
+
+        for m in messages:
+            role = m["role"]
+            if role == "user":
+                add("user", [{"type": "text", "text": m.get("content") or ""}])
+            elif role == "assistant":
+                blocks = [{"type": "text", "text": m["content"]}] if m.get("content") else []
+                for c in m.get("tool_calls") or []:
+                    f = c["function"]
+                    try:
+                        args = json.loads(f.get("arguments") or "{}")
+                        args = args if isinstance(args, dict) else {"_raw_arguments": f.get("arguments")}
+                    except ValueError:
+                        args = {"_raw_arguments": f.get("arguments")}
+                    blocks.append({"type": "tool_use", "id": c["id"], "name": f["name"], "input": args})
+                if blocks:
+                    add("assistant", blocks)
+            elif role == "tool":
+                text = str(m.get("content") or "")
+                block = {"type": "tool_result", "tool_use_id": m["tool_call_id"], "content": text}
+                if text.startswith("error:"):
+                    block["is_error"] = True
+                # tool_result blocks must come first in the user message that follows the tool_use
+                if out and out[-1]["role"] == "user" and any(b["type"] == "tool_result" for b in out[-1]["content"]):
+                    out[-1]["content"].append(block)
+                else:
+                    add("user", [block])
+        return out
+
+    def _chat_anthropic(self, *, model, messages, system, tools, max_tokens, temperature, on_text=None) -> ModelResponse:
+        msgs = self._to_anthropic_messages(messages)
+        body: dict = {"model": model, "max_tokens": max_tokens, "messages": msgs}
+        if system:
+            body["system"] = [{"type": "text", "text": system}]
+        if tools:
+            body["tools"] = [{"name": t["function"]["name"], "description": t["function"].get("description", ""),
+                              "input_schema": t["function"].get("parameters") or {"type": "object", "properties": {}}} for t in tools]
+        if temperature is not None:
+            body["temperature"] = temperature
+        if self.prompt_cache:                                          # three breakpoints: system, tools, the newest content block
+            if system:
+                body["system"][-1]["cache_control"] = {"type": "ephemeral"}
+            if tools:
+                body["tools"][-1]["cache_control"] = {"type": "ephemeral"}
+            if msgs:
+                msgs[-1]["content"][-1]["cache_control"] = {"type": "ephemeral"}
+        body.update(self.extra_body)
+        if on_text is not None:
+            body["stream"] = True
+            data = self._post_stream("/v1/messages", body, on_text, fold=_fold_anthropic_stream)
+        else:
+            data = self._post("/v1/messages", body)
+        if not isinstance(data, dict) or data.get("type") == "error" or "content" not in data:
+            raise APIError(f"unexpected response: {str(data)[:300]}")
+        text = "".join(b.get("text", "") for b in data["content"] if b.get("type") == "text")
+        calls = [ToolCall(b["id"], b["name"], json.dumps(b.get("input") or {}, ensure_ascii=False))
+                 for b in data["content"] if b.get("type") == "tool_use"]
+        u = data.get("usage") or {}
+        cache_read, cache_new = u.get("cache_read_input_tokens", 0) or 0, u.get("cache_creation_input_tokens", 0) or 0
+        usage = {"input_tokens": (u.get("input_tokens", 0) or 0) + cache_read + cache_new,       # includes the cached prefix, like the others
+                 "output_tokens": u.get("output_tokens", 0) or 0, "cache_hit_tokens": cache_read, "cache_creation_tokens": cache_new,
+                 "reasoning_tokens": 0, "reasoning_chars": 0}
+        return ModelResponse(text, calls, _ANTHROPIC_STOP.get(data.get("stop_reason"), data.get("stop_reason") or "stop"), usage,
+                             model=data.get("model") or "")
 
     # ------------------------------------------------------------------ Gemini native
     @staticmethod
@@ -319,13 +409,24 @@ class ChatClient:
         base = 5.0 if status == 429 else 1.0
         return min(base * 2 ** attempt, 60.0) + random.random()
 
-    def _post_stream(self, path: str, body: dict, on_text) -> dict:
+    def _headers(self) -> dict:
+        h = {"Content-Type": "application/json"}
+        if self.api_style == "gemini":
+            h["x-goog-api-key"] = self.api_key
+        elif self.api_style == "anthropic":
+            h["x-api-key"] = self.api_key
+            h["anthropic-version"] = ANTHROPIC_VERSION
+        else:
+            h["Authorization"] = f"Bearer {self.api_key}"
+        return h
+
+    def _post_stream(self, path: str, body: dict, on_text, fold=None) -> dict:
         """A streaming chat-completions request, folded back into the shape of a non-streaming response (so the parsing above is shared).
         Connection and HTTP errors before the first byte are retried like in `_post`; once data has started to arrive a broken stream
         is an APIError (the partial text was already shown, so retrying would repeat it)."""
         req = urllib.request.Request(
             self.base_url + path, data=json.dumps(body).encode("utf-8"), method="POST",
-            headers={"Content-Type": "application/json", "Accept": "text/event-stream", "Authorization": f"Bearer {self.api_key}"})
+            headers={**self._headers(), "Accept": "text/event-stream"})
         for attempt in range(self.retries + 1):
             try:
                 resp = urllib.request.urlopen(req, timeout=self.timeout)
@@ -345,7 +446,7 @@ class ChatClient:
                 raise APIError(f"network error: {e}")
             with resp:
                 try:
-                    return _fold_stream(resp, on_text)
+                    return (fold or _fold_stream)(resp, on_text)
                 except (OSError, TimeoutError) as e:
                     raise APIError(f"stream interrupted: {e}")
         raise APIError("unreachable")
@@ -353,9 +454,7 @@ class ChatClient:
     def _post(self, path: str, body: dict) -> dict:
         req = urllib.request.Request(
             self.base_url + path, data=json.dumps(body).encode("utf-8"), method="POST",
-            headers={"Content-Type": "application/json",
-                     **({"x-goog-api-key": self.api_key} if self.api_style == "gemini"
-                        else {"Authorization": f"Bearer {self.api_key}"})},
+            headers=self._headers(),
         )
         for attempt in range(self.retries + 1):
             try:
@@ -429,6 +528,70 @@ def _fold_stream(resp, on_text) -> dict:
     msg = {"content": "".join(text), "reasoning_content": "".join(reasoning),
            "tool_calls": [calls[i] for i in sorted(calls)] or None}
     return {"model": model, "usage": usage or {}, "choices": [{"message": msg, "finish_reason": finish}]}
+
+
+def _fold_anthropic_stream(resp, on_text) -> dict:
+    """The Messages API event stream (message_start, content_block_start/delta/stop, message_delta, message_stop) folded back into the
+    shape of a non-streaming response."""
+    blocks: dict[int, dict] = {}
+    usage: dict = {}
+    stop_reason, model = None, ""
+    event = None
+    while True:
+        raw = resp.readline()
+        if not raw:
+            break
+        line = raw.decode("utf-8", "replace").strip()
+        if line.startswith("event:"):
+            event = line[6:].strip()
+            continue
+        if not line.startswith("data:"):
+            continue
+        try:
+            d = json.loads(line[5:].strip())
+        except ValueError:
+            continue
+        if not isinstance(d, dict):
+            continue
+        t = d.get("type") or event
+        if t == "error":
+            raise APIError(f"stream error: {str(d.get('error'))[:300]}")
+        if t == "message_start":
+            msg = d.get("message") or {}
+            model = msg.get("model") or model
+            usage.update(msg.get("usage") or {})
+        elif t == "content_block_start":
+            cb = dict(d.get("content_block") or {})
+            if cb.get("type") == "tool_use":
+                cb["_json"] = ""
+            blocks[d.get("index", len(blocks))] = cb
+            if cb.get("type") == "text" and cb.get("text"):
+                on_text(cb["text"])
+        elif t == "content_block_delta":
+            cb, delta = blocks.setdefault(d.get("index", 0), {"type": "text", "text": ""}), d.get("delta") or {}
+            if delta.get("type") == "text_delta":
+                cb["text"] = cb.get("text", "") + delta.get("text", "")
+                on_text(delta.get("text", ""))
+            elif delta.get("type") == "input_json_delta":
+                cb["_json"] = cb.get("_json", "") + delta.get("partial_json", "")
+        elif t == "message_delta":
+            stop_reason = (d.get("delta") or {}).get("stop_reason") or stop_reason
+            usage.update(d.get("usage") or {})
+        elif t == "message_stop":
+            break
+    if not blocks and stop_reason is None and not usage:
+        raise APIError("stream ended without any data")
+    content = []
+    for i in sorted(blocks):
+        cb = blocks[i]
+        if cb.get("type") == "tool_use":
+            try:
+                inp = json.loads(cb.pop("_json", "") or "{}")
+            except ValueError:
+                inp = {}
+            cb["input"] = inp
+        content.append(cb)
+    return {"type": "message", "model": model, "content": content, "stop_reason": stop_reason, "usage": usage}
 
 
 def _deep_update(dst: dict, src: dict) -> dict:

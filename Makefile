@@ -1,10 +1,11 @@
 # Common tasks. `make check` is what CI runs (minus the Docker and interop jobs).
 PY ?= python
-.PHONY: help install test lint check golden golden-check results-index interop evals sandbox clean
+.PHONY: help install test cov lint check golden golden-check results-index interop evals sandbox clean
 
 help:
 	@echo "make install       editable install with dev + serve extras"
 	@echo "make test          pytest (no model calls; Docker tests skip without the sandbox image)"
+	@echo "make cov           pytest with branch coverage (fails below the floor in pyproject.toml)"
 	@echo "make lint          ruff"
 	@echo "make check         lint + tests + schema check of the golden trajectories"
 	@echo "make golden        regenerate tests/golden (only for a deliberate behaviour change; review the diff)"
@@ -18,6 +19,9 @@ install:
 
 test:
 	$(PY) -m pytest -q
+
+cov:
+	$(PY) -m pytest -q --cov --cov-report=term-missing:skip-covered
 
 lint:
 	ruff check .

@@ -20,7 +20,10 @@ jobs:
           python-version: ${{ matrix.python }}
       - run: pip install -e ".[dev,serve]"
       - run: ruff check .
-      - run: pytest -q
+      - run: pytest -q --cov --cov-report=term-missing:skip-covered
+      - name: coverage summary
+        if: matrix.python == '3.12'
+        run: coverage report --format=markdown >> "$GITHUB_STEP_SUMMARY"
       # the golden trajectories must stay valid against the documented schema
       - run: miniagent-eval check-trajectories tests/golden
 

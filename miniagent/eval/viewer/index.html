@@ -137,6 +137,7 @@ function buildRun(events) {
     if (e.event === "run_start") run.start = e;
     else if (e.event === "run_end") run.end = e;
     else if (e.event === "compaction") pending.push(e);
+    else if (e.event === "git_commit") pendingMarks.push(e.error ? "git commit failed: " + e.error : "git commit " + (e.sha || "").slice(0, 8) + ": " + (e.files || []).join(", "));
     else if (e.event === "stuck") pendingMarks.push("stuck detector (" + e.kind + " ×" + e.count + "): " + e.action);
     else if (e.event === "budget") pendingMarks.push("budget: " + e.reason + " — the run stopped before step " + e.step);
     else if (e.event === "run_resume") pendingMarks.push("session resumed with a new instruction: " + clip(e.task, 120));

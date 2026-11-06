@@ -11,6 +11,8 @@ import random
 from collections import Counter, defaultdict
 from pathlib import Path
 
+from .stats import fisher_exact, sign_flip_test, verdict, wilson
+
 
 def load_records(result_dir: str | Path) -> list[dict]:
     p = Path(result_dir) / "runs.jsonl"
@@ -153,7 +155,18 @@ def compare(a: list[dict], b: list[dict]) -> dict:
         "regressed": [t for t in common if pb[t] < pa[t]],
         "unchanged": sum(1 for t in common if pb[t] == pa[t]),
         "steps_a": _mean(r["steps"] for r in a), "steps_b": _mean(r["steps"] for r in b),
+        **_run_level(a, b, common, diffs),
     }
+
+
+def _run_level(a: list[dict], b: list[dict], common: list[str], diffs: list[float]) -> dict:
+    """Pooled run counts on the common tasks and the two tests next to the task-level bootstrap (see stats.py)."""
+    on = set(common)
+    ka, na = sum(1 for r in a if r["task_id"] in on and r["passed"]), sum(1 for r in a if r["task_id"] in on)
+    kb, nb = sum(1 for r in b if r["task_id"] in on and r["passed"]), sum(1 for r in b if r["task_id"] in on)
+    p_pair, p_pool = sign_flip_test(diffs), fisher_exact(ka, na - ka, kb, nb - kb)
+    return {"runs_a": [ka, na], "runs_b": [kb, nb], "wilson_a": list(wilson(ka, na)), "wilson_b": list(wilson(kb, nb)),
+            "p_paired_tasks": p_pair, "p_pooled_runs": p_pool, "verdict": verdict(p_pair, p_pool)}
 
 
 def markdown_compare(name_a: str, name_b: str, c: dict) -> str:
@@ -163,6 +176,13 @@ def markdown_compare(name_a: str, name_b: str, c: dict) -> str:
         f"- common tasks: {c['n_common_tasks']}",
         f"- pass rate: {c['pass_a'] * 100:.1f}% → {c['pass_b'] * 100:.1f}% "
         f"(diff {c['mean_diff'] * 100:+.1f} pts, 95% CI {_fmt(ci[0] * 100, 1)} to {_fmt(ci[1] * 100, 1)})",
+        f"- runs passed: {c['runs_a'][0]}/{c['runs_a'][1]} → {c['runs_b'][0]}/{c['runs_b'][1]} "
+        f"(Wilson 95%: {c['wilson_a'][0] * 100:.0f}–{c['wilson_a'][1] * 100:.0f}% → {c['wilson_b'][0] * 100:.0f}–{c['wilson_b'][1] * 100:.0f}%)",
+        f"- paired sign-flip test over tasks: p = {c['p_paired_tasks']:.3f}; Fisher exact over pooled runs: p = {c['p_pooled_runs']:.3f}",
+        f"- **verdict: {c['verdict']}**",
+        *([ "- WARNING: the bootstrap interval above excludes 0 but the tests do not agree it is a real difference: "
+            "the interval ignores run-to-run noise. Do not quote this as an improvement." ]
+          if (c["diff_ci95"][0] > 0 or c["diff_ci95"][1] < 0) and not c["verdict"] == "different" else []),
         f"- mean steps: {c['steps_a']:.1f} → {c['steps_b']:.1f}",
         f"- improved ({len(c['improved'])}): {', '.join(c['improved']) or '-'}",
         f"- regressed ({len(c['regressed'])}): {', '.join(c['regressed']) or '-'}",

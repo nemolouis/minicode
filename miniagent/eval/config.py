@@ -29,7 +29,7 @@ def _spec():
         "disabled_tools": (list, "tools"), "features": (list, "features"),
         "log_reasoning": (bool, ""), "sandbox": (bool, ""), "edit_hints": (bool, ""), "require_read": (bool, ""),
         "diagnostics": (bool, ""), "parallel_tools": (bool, ""), "validate_args": (bool, ""),
-        "tool_result_json": (bool, ""), "text_tool_calls": (bool, ""),
+        "tool_result_json": (bool, ""), "text_tool_calls": (bool, ""), "prompt_cache": (bool, ""),
         "permissions": (dict, "permissions"), "mcp_servers": (list, "mcp"),
         "system_prompt_file": (str, "file"),
         "output_budget": (bool, ""), "stuck_warn_after": (int, "stuck"), "stuck_stop_after": (int, "pos"),
@@ -91,8 +91,8 @@ def validate_config(cfg, *, check_files: bool = True) -> list[str]:
             errs.append(f"stuck_warn_after: 0 (off) or >= 2, got {v}")
         elif check == "tier" and v not in ("off_peak", "peak"):
             errs.append(f"price_tier: must be 'off_peak' or 'peak', got {v!r}")
-        elif check == "api_style" and v not in ("openai", "gemini"):
-            errs.append(f"api_style: must be 'openai' or 'gemini', got {v!r}")
+        elif check == "api_style" and v not in ("openai", "gemini", "anthropic"):
+            errs.append(f"api_style: must be 'openai', 'gemini' or 'anthropic', got {v!r}")
         elif check == "url" and not v.startswith(("http://", "https://")):
             errs.append(f"base_url: must start with http:// or https://, got {v!r}")
         elif check == "file" and check_files and not Path(v).is_file():
