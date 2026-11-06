@@ -805,3 +805,21 @@ def test_quitting_in_the_middle_of_a_turn_does_not_crash_the_ui(env):
         await pilot.pause(0.5)
 
     run(go, env, [slow])
+
+
+# ---------------------------------------------------------------- an approval must not look like "working"
+def test_waiting_for_approval_is_shown_as_such_and_rings_the_bell(env):
+    seen = {}
+    rang = []
+
+    async def go(app, pilot):
+        app.bell = lambda: rang.append(1)
+        await say(app, pilot, "write it")
+        await wait_for_panel(app, pilot)
+        await pilot.pause(0.3)
+        seen["waiting"] = app.query_one("#working").content.plain
+        await pilot.press("y")
+        await idle(app, pilot)
+
+    run(go, env, approval_script())
+    assert "Waiting for YOUR approval" in seen["waiting"] and "Working…" not in seen["waiting"] and rang

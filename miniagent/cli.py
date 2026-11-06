@@ -6,9 +6,9 @@ from pathlib import Path
 
 import json
 
-from .agent import Agent
+from .agent import INTERACTIVE_SYSTEM_PROMPT, SYSTEM_PROMPT, Agent
 from .budget import Budget
-from .permissions import Permissions
+from .permissions import READ_ONLY_DEFAULTS, Permissions
 from .mcp.client import mcp_session
 from .client import APIError, ChatClient
 from .tools import Workspace
@@ -97,6 +97,9 @@ def main(argv=None) -> int:
     ap.add_argument("--disable-tools", default="", help="comma-separated built-in tools to hide, e.g. bash,grep,read_file")
     ap.add_argument("--features", default="", help="comma-separated opt-in features: memory (AGENTS.md), todo, explore (read-only sub-agent), glob")
     ap.add_argument("--permissions", help="JSON file with allow / ask / deny rules, e.g. {\"deny\": [\"bash(curl*)\"], \"allow\": [\"bash(pytest*)\"]}")
+    ap.add_argument("--ask-everything", action="store_true",
+                    help="interactive mode only: also ask before read-only shell commands (ls, cat, grep, git status/log/diff, ...), "
+                         "which are otherwise allowed without asking")
     ap.add_argument("--require-read", action="store_true", help="edit_file refuses files the agent has not read in this session")
     ap.add_argument("--diagnostics", action="store_true", help="warn when a .py/.json file the agent just wrote no longer parses")
     ap.add_argument("--resume", metavar="RUN_DIR", help="continue the session saved in this run directory (task = follow-up instruction)")
@@ -157,6 +160,8 @@ def main(argv=None) -> int:
         print(f"error: permissions: {e}", file=sys.stderr)
         return 2
 
+    if interactive and not args.ask_everything:
+        permissions = Permissions.merge(permissions, READ_ONLY_DEFAULTS)         # your own rules come first and win (deny > ask > allow)
     try:
         client = ChatClient(api_style=args.api_style) if args.api_style else ChatClient()
     except APIError as e:
@@ -213,7 +218,8 @@ def main(argv=None) -> int:
                 validate_args=not args.no_validate, permissions=permissions, session=not args.no_session,
                 stuck_warn_after=args.stuck_warn, stuck_stop_after=args.stuck_stop, budget=budget,
                 output_budget=args.output_budget, on_text=on_text or (_printer() if args.stream else None), git=git,
-                keep_background=interactive, disabled_tools=tuple(t for t in args.disable_tools.split(",") if t),
+                keep_background=interactive, system=INTERACTIVE_SYSTEM_PROMPT if interactive else SYSTEM_PROMPT,
+                disabled_tools=tuple(t for t in args.disable_tools.split(",") if t),
             )
 
         if interactive:

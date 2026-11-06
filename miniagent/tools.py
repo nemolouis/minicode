@@ -10,6 +10,7 @@ import difflib
 import json
 import os
 import re
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -188,7 +189,7 @@ class Workspace:
         return f". {note} (lines {at + 1}-{at + k}):\n{shown}"
 
     def bash(self, args: dict) -> str:
-        cmd = args["command"]
+        cmd = self._repair_html_entities(args["command"])
         reason = check_command(cmd)
         if reason:
             raise ToolError(f"command blocked by safety policy: {reason}")
@@ -245,6 +246,21 @@ class Workspace:
             if len(out) >= 200:
                 return "\n".join(out) + "\n... (stopped at 200 paths)"
         return "\n".join(out) or "no matches"
+
+    @staticmethod
+    def _repair_html_entities(cmd: str) -> str:
+        """Some models write `&amp;&amp;` / `&gt;` in the arguments of a tool call. If the command is not valid shell as written but is
+        once the entities are decoded, run the decoded one; a command that parses is never touched (grep '&amp;' in HTML is legitimate)."""
+        if "&" not in cmd or not re.search(r"&(amp|lt|gt|quot|#39);", cmd):
+            return cmd
+        import html
+        fixed = html.unescape(cmd)
+        try:
+            ok_as_written = subprocess.run(["sh", "-n", "-c", cmd], capture_output=True, timeout=5).returncode == 0
+            ok_decoded = subprocess.run(["sh", "-n", "-c", fixed], capture_output=True, timeout=5).returncode == 0
+        except (OSError, subprocess.SubprocessError):
+            return cmd
+        return fixed if (not ok_as_written and ok_decoded) else cmd
 
     def grep(self, args: dict) -> str:
         try:

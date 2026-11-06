@@ -17,7 +17,7 @@
 
 | 部分 | 状态 | 说明 |
 |---|---|---|
-| M1 agent 主循环与工具 | 完成 | 见 [docs/features.md](docs/features.md)；全仓库 781 个测试（不调用模型；需要 Docker 的测试在没有 Docker 时自动跳过，当前环境 748 通过、33 跳过） |
+| M1 agent 主循环与工具 | 完成 | 见 [docs/features.md](docs/features.md)；全仓库 842 个测试（不调用模型；需要 Docker 的测试在没有 Docker 时自动跳过，当前环境 809 通过、33 跳过） |
 | M2 评测 harness | 完成 | 任务集、dev/test 划分、隐藏测试、规则化判分、配对对比、断点续跑；实验结果见 [docs/eval.md](docs/eval.md)；test 集未跑 |
 | M3 轨迹回放 | 完成 | `miniagent-eval view`：浏览所有运行、逐步回放、两次运行并排对比；未做按条件导出轨迹 |
 | M4 MCP server | 完成 | 手写的 MCP 笔记服务器 + 客户端（stdio 和 Streamable HTTP）+ 越界/越权测试（见 [docs/mcp-and-service.md](docs/mcp-and-service.md)）；已用官方 `mcp` SDK 2.3.0 做双向互操作检查（17/17，见 `scripts/mcp_interop.py`） |

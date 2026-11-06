@@ -22,6 +22,23 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+# Commands that only read. The interactive clients allow these without asking (a "hi" must not cost five approvals), unless the
+# user's own rules say otherwise. `ask` beats `allow`, so anything that mentions an absolute path, `~` or `..` still asks (a read of
+# ~/.ssh/id_rsa is a read too); `deny` beats both, which removes the find/rg/git options that execute or write. Not a security
+# boundary: a convenience, as the module docstring says of every rule here.
+_READ_ONLY_COMMANDS = ["ls", "pwd", "cat", "head", "tail", "wc", "sort", "uniq", "cut", "tr", "echo", "cd", "grep", "rg", "find", "tree",
+                       "file", "stat", "du", "which", "git status", "git log", "git diff", "git show", "git rev-parse", "git remote -v",
+                       "git ls-files"]
+_GIT_BRANCH_READ = ["git branch", "git branch -a", "git branch -r", "git branch -v", "git branch -vv", "git branch --list", "git branch --show-current"]
+READ_ONLY_DEFAULTS = {
+    # `git branch` with anything else can delete or rename branches, so only the listing forms are allowed, exactly
+    "allow": [f"bash({c}{suffix})" for c in _READ_ONLY_COMMANDS for suffix in ("", " *")] + [f"bash({c})" for c in _GIT_BRANCH_READ],
+    "ask": ["bash(* /*)", "bash(* ~*)", "bash(*..*)", "bash(*$HOME*)"],
+    "deny": ["bash(find*-exec*)", "bash(find*-execdir*)", "bash(find*-delete*)", "bash(find*-fprint*)", "bash(find*-fls*)", "bash(find*-ok*)",
+             "bash(*--output*)", "bash(*--ext-diff*)", "bash(*--textconv*)", "bash(rg*--pre*)", "bash(git*-c *)", "bash(git*--exec-path*)"],
+}
+
+_HARMLESS_REDIRECT = re.compile(r"\s*\d?>>?\s*/dev/null|\s*\d?>&\d")      # 2>/dev/null, >/dev/null, 2>&1
 _SEPARATORS = re.compile(r"&&|\|\||[;&|\n]")
 _UNSAFE_FOR_ALLOW = re.compile(r"\$\(|`|<\(|>\(|[<>]")
 _RULE = re.compile(r"^\s*([^()\s]+)\s*(?:\((.*)\))?\s*$", re.S)
@@ -119,6 +136,16 @@ class Permissions:
         self.deny = [parse_rule(r) for r in deny]
 
     @classmethod
+    def merge(cls, *parts: "Permissions | dict | None") -> "Permissions | None":
+        """Rules of several sources together (user rules first); None if there are none. deny > ask > allow still holds across them."""
+        out = {"allow": [], "ask": [], "deny": []}
+        for p in parts:
+            d = p.to_dict() if isinstance(p, Permissions) else (p or {})
+            for k in out:
+                out[k] += list(d.get(k, []))
+        return cls(**out) if any(out.values()) else None
+
+    @classmethod
     def from_dict(cls, d: dict | None) -> "Permissions | None":
         if not d:
             return None
@@ -173,19 +200,26 @@ class Permissions:
                 except ValueError:
                     pass
             subject = _norm_path(subject)                  # `src/../.env` must not slip past a `.env*` rule
-        segments = [s.strip() for s in _SEPARATORS.split(subject)] if name == "bash" and subject is not None else [subject]
-        segments = [s for s in segments if s != ""] or [subject]
+        def split(text):
+            segs = [x.strip() for x in _SEPARATORS.split(text)] if name == "bash" and text is not None else [text]
+            return [x for x in segs if x != ""] or [text]
+
+        # `2>/dev/null` and `2>&1` write nothing: for ask/allow they are removed first (so they neither make a read-only command ask nor
+        # split it at the `&`); deny looks at the command exactly as written
+        clean = _HARMLESS_REDIRECT.sub("", subject) if name == "bash" and subject is not None else subject
+        raw_segments, clean_segments = split(subject), split(clean)
         for r in self.deny:
-            if r.matches_subject(name, subject) or any(r.matches_subject(name, s) for s in segments):
+            if r.matches_subject(name, subject) or any(r.matches_subject(name, x) for x in raw_segments) or \
+                    r.matches_subject(name, clean) or any(r.matches_subject(name, x) for x in clean_segments):
                 return Decision("deny", r.text)
         for r in self.ask:
-            if r.matches_subject(name, subject) or any(r.matches_subject(name, s) for s in segments):
+            if r.matches_subject(name, clean) or any(r.matches_subject(name, x) for x in clean_segments):
                 return Decision("ask", r.text)
         if name == "bash":
-            if subject is None or _UNSAFE_FOR_ALLOW.search(subject):
+            if clean is None or _UNSAFE_FOR_ALLOW.search(clean):
                 return Decision("default")
             used = []
-            for seg in segments:
+            for seg in clean_segments:
                 hit = next((r for r in self.allow if r.matches_subject(name, seg)), None)
                 if hit is None:
                     return Decision("default")

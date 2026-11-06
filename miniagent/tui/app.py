@@ -432,8 +432,12 @@ class MiniAgentApp(App):
         w = self._w("#working", Static)
         if self.busy:
             frame = SPINNER[int(time.time() * 10) % len(SPINNER)]
-            state = "Interrupting…" if self.ctl.agent.cancel_event.is_set() else "Working…"
-            w.update(Text(f"{frame} {state} {int(time.time() - self._turn_t0)}s · esc to interrupt", style="yellow"))
+            if self._pending_approval is not None and not self._pending_approval.done():
+                w.update(Text(f"⏸ Waiting for YOUR approval below: y allow · a allow all · n deny   ({int(time.time() - self._turn_t0)}s)",
+                              style="bold yellow"))
+            else:
+                state = "Interrupting…" if self.ctl.agent.cancel_event.is_set() else "Working…"
+                w.update(Text(f"{frame} {state} {int(time.time() - self._turn_t0)}s · esc to interrupt", style="yellow"))
             w.add_class("show")
         else:
             w.remove_class("show")
@@ -645,6 +649,7 @@ class MiniAgentApp(App):
         lines = describe_action(name, args, self.ctl.workspace)
         panel = ApprovalPanel(name, lines)
         self._w(PromptInput).disabled = True
+        self.bell()                                                 # the agent is blocked until you answer: make sure it is noticed
         await self._base.mount(panel, before=self._w("#slashmenu"))
         self._w("#conversation", VerticalScroll).scroll_end(animate=False)
 
