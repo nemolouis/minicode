@@ -11,7 +11,7 @@ import sys
 import time
 from pathlib import Path
 
-from miniagent.taskgen.generate import GenConfig, Runner, Seed
+from minicode.taskgen.generate import GenConfig, Runner, Seed
 
 WORK = Path(sys.argv[1])
 SKIP_DIRS = {"docs", "doc", "benchmarks", "benchmark", "examples", "demos", "bin", "scripts", "tools", "requirements"}

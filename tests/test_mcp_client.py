@@ -6,7 +6,7 @@ import time
 
 import pytest
 
-from miniagent.mcp.client import McpClient, McpError, McpRpcError, McpTimeout, mcp_session
+from minicode.mcp.client import McpClient, McpError, McpRpcError, McpTimeout, mcp_session
 
 FAKE = textwrap.dedent('''
     import json, os, sys, time
@@ -83,7 +83,7 @@ def notes(tmp_path):
 
 
 def real_server(notes, *extra):
-    return McpClient([sys.executable, "-m", "miniagent.mcp.notes_server", "--root", str(notes), *extra])
+    return McpClient([sys.executable, "-m", "minicode.mcp.notes_server", "--root", str(notes), *extra])
 
 
 # ---------------------------------------------------------------- against the real server
@@ -92,7 +92,7 @@ def test_end_to_end_modern(notes):
     c.start()
     try:
         c.initialize()
-        assert c.era == "modern" and c.server_info["name"] == "miniagent-notes" and "notes" in c.instructions
+        assert c.era == "modern" and c.server_info["name"] == "minicode-notes" and "notes" in c.instructions
         assert [t["name"] for t in c.list_tools()] == ["list_notes", "read_note", "search_notes"]
         text, is_error = c.call_tool("read_note", {"path": "a.md"})
         assert not is_error and "hello TODO" in text
@@ -215,5 +215,5 @@ def test_a_dead_command_fails_cleanly(tmp_path):
 
 def test_mcp_session_needs_an_allow_list(notes):
     with pytest.raises(ValueError, match="allow"):
-        with mcp_session([{"name": "notes", "command": ["python", "-m", "miniagent.mcp.notes_server", "--root", str(notes)]}]):
+        with mcp_session([{"name": "notes", "command": ["python", "-m", "minicode.mcp.notes_server", "--root", str(notes)]}]):
             pass

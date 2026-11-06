@@ -274,12 +274,12 @@ DeepSeek flash,温度 0.7,计划 257 道 train 题 × 2 次 = 514 次运行,**�
 **方案 1 要改的文件**:
 1. 新增 `prompts/chat_template_plain.jinja`(上面的原型,从模型自带模板改两处)。
 2. `scripts/sft_mlx.py`:`encode` 接受并使用该模板(加 `--chat-template` 参数);`check`/`memtest`/`train` 都要带上。
-3. `miniagent/client.py`:`extract_text_tool_calls` 清理文本时也去掉 `[TOOL_CALL]` / `[/TOOL_CALL]`(原型里解析后会残留空的包装行),加测试。
+3. `minicode/client.py`:`extract_text_tool_calls` 清理文本时也去掉 `[TOOL_CALL]` / `[/TOOL_CALL]`(原型里解析后会残留空的包装行),加测试。
 4. 服务端:`mlx_lm.server --chat-template` 只接受模板文本,而模型目录里的 `chat_template.jinja` 文件可能优先于它,所以更稳妥的做法是为这个适配器建一个单独的模型目录(权重用符号链接,配自己的 `chat_template.jinja`);`scripts/serve_mlx.py` 指向它。训练和服务必须用同一个模板,否则提示词不一致。
 5. 新增离线测试:渲染 → 解析 → 与原调用一致,以及"助手回合内无特殊 token"(模型目录缺失时跳过)。
 **注意**:基础模型自带的 `<tool_call>` 函数调用能力不再被利用(它本来在这个任务上就是 0/48);数据 v2(原 old_string)和 v3(缩短)都要在新格式下各训练一次才能做那个配对,每次约 105 分钟。
 
-**方案 1 已实现(2026-10-25,只改代码和测试,没训练)**:`prompts/chat_template_plain.jinja`;`scripts/sft_mlx.py` 的 `check/train/selftest/gradcheck/memtest` 新增 `--chat-template`(写入 `adapter_config.json`);`miniagent/client.py` 清掉 `[TOOL_CALL]` 包装行;`scripts/make_plain_model.py` 生成 `models/<模型>-plain`(权重符号链接 + 自己的 `chat_template.jinja`,已生成 4 位那个);`scripts/serve_mlx.py` 启动前核对"适配器训练用的模板 = 模型目录里的模板",不一致就拒绝启动。测试:全套 373 个通过、1 个跳过(token 测试需要 transformers,`.venv` 里没有,已在 `.venv-mlx` 里用 pytest 替身实际执行并通过,跳过的原因不是失败)。过程中断言抓到一个真 bug:HF 分词器自己也有 `_tokenizer` 属性(Rust 对象),第一版把模板设错了地方,已修正并在 HF 分词器和 mlx_lm 的 TokenizerWrapper 上都验证。新模板下 `check` 的结果:max-len 4096 内 155 条(原 160)。
+**方案 1 已实现(2026-10-25,只改代码和测试,没训练)**:`prompts/chat_template_plain.jinja`;`scripts/sft_mlx.py` 的 `check/train/selftest/gradcheck/memtest` 新增 `--chat-template`(写入 `adapter_config.json`);`minicode/client.py` 清掉 `[TOOL_CALL]` 包装行;`scripts/make_plain_model.py` 生成 `models/<模型>-plain`(权重符号链接 + 自己的 `chat_template.jinja`,已生成 4 位那个);`scripts/serve_mlx.py` 启动前核对"适配器训练用的模板 = 模型目录里的模板",不一致就拒绝启动。测试:全套 373 个通过、1 个跳过(token 测试需要 transformers,`.venv` 里没有,已在 `.venv-mlx` 里用 pytest 替身实际执行并通过,跳过的原因不是失败)。过程中断言抓到一个真 bug:HF 分词器自己也有 `_tokenizer` 属性(Rust 对象),第一版把模板设错了地方,已修正并在 HF 分词器和 mlx_lm 的 TokenizerWrapper 上都验证。新模板下 `check` 的结果:max-len 4096 内 155 条(原 160)。
 **训练命令(未执行)**:在原命令上加 `--chat-template prompts/chat_template_plain.jinja`;服务用 `--model models/qwen2.5-coder-1.5b-instruct-4bit-plain`。
 
 ### 新格式(普通文本工具调用)的评测结果(2026-10-26)

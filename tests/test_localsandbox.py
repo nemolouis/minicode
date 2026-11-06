@@ -7,11 +7,11 @@ import time
 
 import pytest
 
-from miniagent import localsandbox as L
-from miniagent.agent import Agent
-from miniagent.client import ModelResponse, ToolCall
-from miniagent.sandbox import SandboxError
-from miniagent.tools import Workspace
+from minicode import localsandbox as L
+from minicode.agent import Agent
+from minicode.client import ModelResponse, ToolCall
+from minicode.sandbox import SandboxError
+from minicode.tools import Workspace
 
 seatbelt = pytest.mark.skipif(L.kind() != "seatbelt", reason="needs macOS sandbox-exec")
 # the behaviour every OS sandbox must have, whichever mechanism this machine uses. The bwrap path has only been run where bubblewrap
@@ -234,7 +234,7 @@ def test_background_is_still_refused_with_docker_style_sandboxes(tmp_path):
 
 # ---------------------------------------------------------------- CLI
 def test_cli_sandbox_kinds(tmp_path, monkeypatch, capsys):
-    from miniagent import cli
+    from minicode import cli
 
     class Quick:
         def chat(self, **kw):
@@ -249,7 +249,7 @@ def test_cli_sandbox_kinds(tmp_path, monkeypatch, capsys):
         assert cli.main(base + ["--sandbox", L.kind()]) == 0
         assert cli.main(base + ["--sandbox", "auto"]) == 0
     monkeypatch.setattr(L, "kind", lambda: None)
-    import miniagent.sandbox as S
+    import minicode.sandbox as S
     monkeypatch.setattr(S, "available", lambda image=S.IMAGE: False)
     assert cli.main(base + ["--sandbox", "auto"]) == 2 and "sandbox image is missing" in capsys.readouterr().err
     assert cli.main(base + ["--sandbox"]) == 2                                              # bare --sandbox still means docker

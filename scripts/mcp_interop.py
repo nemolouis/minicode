@@ -3,9 +3,9 @@
 
   1. our HTTP client     -> SDK server over Streamable HTTP
   2. our stdio client    -> SDK server over stdio
-  3. SDK client (stdio)  -> our notes server (miniagent/mcp/notes_server.py)
+  3. SDK client (stdio)  -> our notes server (minicode/mcp/notes_server.py)
 
-The SDK is a third-party dependency, so run this in a separate environment (miniagent itself needs nothing):
+The SDK is a third-party dependency, so run this in a separate environment (minicode itself needs nothing):
 
     python3 -m venv .venv-sdk && .venv-sdk/bin/pip install mcp && .venv-sdk/bin/pip install -e .
     .venv-sdk/bin/python scripts/mcp_interop.py
@@ -63,7 +63,7 @@ def check(name: str, ok: bool, detail: str = "") -> None:
 
 
 def drive(client, label: str) -> None:
-    from miniagent.mcp.client import McpError
+    from minicode.mcp.client import McpError
     client.initialize()
     check(f"{label}: handshake", client.era in ("modern", "legacy"), f"era={client.era}, server={client.server_info}")
     tools = {t["name"]: t for t in client.list_tools()}
@@ -94,7 +94,7 @@ def wait_port(port: int, proc: subprocess.Popen, seconds: float = 20) -> bool:
 
 
 def check_our_http_client() -> None:
-    from miniagent.mcp.client import McpHttpClient
+    from minicode.mcp.client import McpHttpClient
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         port = s.getsockname()[1]
@@ -115,7 +115,7 @@ def check_our_http_client() -> None:
 
 
 def check_our_stdio_client() -> None:
-    from miniagent.mcp.client import McpClient
+    from minicode.mcp.client import McpClient
     c = McpClient([sys.executable, str(HERE), "--serve-stdio"], timeout=15)
     c.start()
     try:
@@ -133,7 +133,7 @@ async def sdk_client_against_our_server() -> None:
     from mcp import ClientSession, StdioServerParameters
     from mcp.client.stdio import stdio_client
     notes = HERE.parent.parent / "examples" / "notes"
-    params = StdioServerParameters(command=sys.executable, args=["-m", "miniagent.mcp.notes_server", "--root", str(notes)])
+    params = StdioServerParameters(command=sys.executable, args=["-m", "minicode.mcp.notes_server", "--root", str(notes)])
     async with stdio_client(params) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()

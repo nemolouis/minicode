@@ -3,7 +3,7 @@
 * macOS: `sandbox-exec` (Seatbelt) with a generated profile;
 * Linux: `bwrap` (bubblewrap) with a read-only view of the filesystem.
 
-The same contract as the Docker sandbox (`miniagent.sandbox.Sandbox`): `exec(command, timeout)` returns a ShellResult, it is a context
+The same contract as the Docker sandbox (`minicode.sandbox.Sandbox`): `exec(command, timeout)` returns a ShellResult, it is a context
 manager, and an infrastructure failure is a `SandboxError`, never something shown to the model as a tool result.
 
 What it enforces: writes only inside the workspace and a private temp directory; no network unless asked; a minimal environment (no API
@@ -93,7 +93,7 @@ class LocalSandbox:
 
     # ---------------------------------------------------------------- lifecycle
     def start(self) -> "LocalSandbox":
-        self._tmp = Path(tempfile.mkdtemp(prefix="miniagent-sb-")).resolve()
+        self._tmp = Path(tempfile.mkdtemp(prefix="minicode-sb-")).resolve()
         if self.mechanism == "seatbelt":
             self._profile = self._tmp.parent / (self._tmp.name + ".sb")
             self._profile.write_text(seatbelt_profile(self.workdir, self._tmp, network=self.network))

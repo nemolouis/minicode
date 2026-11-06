@@ -1,4 +1,4 @@
-# 01 · `miniagent/safety.py`:危险命令黑名单
+# 01 · `minicode/safety.py`:危险命令黑名单
 
 **作用**:agent 能执行 shell 命令,这个文件在命令真正执行前做最后一道检查。命中任何一条规则就拒绝。它不能被 `-y` 绕过。
 

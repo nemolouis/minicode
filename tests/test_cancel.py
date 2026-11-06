@@ -5,12 +5,12 @@ import time
 
 import pytest
 
-from miniagent.agent import Agent
-from miniagent.client import ModelResponse, ToolCall
-from miniagent.proc import run_shell
-from miniagent.session import load_session
-from miniagent.tools import Workspace
-from miniagent.trajectory import Trajectory
+from minicode.agent import Agent
+from minicode.client import ModelResponse, ToolCall
+from minicode.proc import run_shell
+from minicode.session import load_session
+from minicode.tools import Workspace
+from minicode.trajectory import Trajectory
 
 
 def call(cid, name, **inp): return ToolCall(cid, name, json.dumps(inp))

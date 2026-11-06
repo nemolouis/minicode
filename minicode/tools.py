@@ -61,7 +61,7 @@ class Tool:
 class Workspace:
     def __init__(self, root: str | Path, sandbox=None, edit_hints: bool = False, require_read: bool = False,
                  diagnostics: bool = False):
-        """`sandbox`: a miniagent.sandbox.Sandbox over `root`. With it, `bash` runs in the container instead of the host.
+        """`sandbox`: a minicode.sandbox.Sandbox over `root`. With it, `bash` runs in the container instead of the host.
         `edit_hints`: edit_file failures also show the closest real lines / file names, so the model can retry.
         `require_read`: edit_file refuses an existing file this run has not read (or written) with read_file/write_file:
         an old_string written from memory is almost always wrong.
@@ -323,7 +323,7 @@ def build_tools(ws: Workspace) -> dict[str, Tool]:
 
 
 def patch_tool(ws: Workspace) -> Tool:
-    """Opt-in (features "patch"): several files edited in one call, all or nothing. See miniagent.patch for the format."""
+    """Opt-in (features "patch"): several files edited in one call, all or nothing. See minicode.patch for the format."""
     return Tool("apply_patch",
                 "Edit several files in one call, atomically: if any part fails, no file is changed. Format:\n"
                 "*** Begin Patch\n*** Update File: path\n@@ optional anchor text (a line of the file to search after)\n context line\n"

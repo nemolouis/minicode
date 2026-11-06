@@ -4,11 +4,11 @@ import json
 
 import pytest
 
-from miniagent.agent import INTERACTIVE_SYSTEM_PROMPT, SYSTEM_PROMPT, Agent
-from miniagent.client import ModelResponse, ToolCall
-from miniagent.permissions import READ_ONLY_DEFAULTS, Permissions
-from miniagent.tools import Workspace
-from miniagent.trajectory import Trajectory
+from minicode.agent import INTERACTIVE_SYSTEM_PROMPT, SYSTEM_PROMPT, Agent
+from minicode.client import ModelResponse, ToolCall
+from minicode.permissions import READ_ONLY_DEFAULTS, Permissions
+from minicode.tools import Workspace
+from minicode.trajectory import Trajectory
 
 P = Permissions.merge(READ_ONLY_DEFAULTS)
 
@@ -85,7 +85,7 @@ class Script:
 def test_cli_interactive_uses_the_conversational_prompt_and_the_read_only_defaults(tmp_path, monkeypatch, capsys):
     import io
 
-    from miniagent import cli
+    from minicode import cli
     w = tmp_path / "w"
     w.mkdir()
     (w / "a.txt").write_text("hello\n")
@@ -101,7 +101,7 @@ def test_cli_interactive_uses_the_conversational_prompt_and_the_read_only_defaul
 def test_cli_ask_everything_brings_the_prompts_back(tmp_path, monkeypatch, capsys):
     import io
 
-    from miniagent import cli
+    from minicode import cli
     w = tmp_path / "w"
     w.mkdir()
     (w / "a.txt").write_text("hello\n")
@@ -113,7 +113,7 @@ def test_cli_ask_everything_brings_the_prompts_back(tmp_path, monkeypatch, capsy
 
 
 def test_one_shot_runs_keep_the_task_prompt_and_get_no_default_allow_rules(tmp_path, monkeypatch):
-    from miniagent import cli
+    from minicode import cli
     w = tmp_path / "w"
     w.mkdir()
     s = Script([(["done"], 1)])

@@ -5,7 +5,7 @@ import json
 import sys
 from pathlib import Path
 
-from miniagent.taskgen.pypi import download, release_info, safe_extract
+from minicode.taskgen.pypi import download, release_info, safe_extract
 
 PINS = {"parse": "1.22.3", "toposort": "1.10", "xmltodict": "1.0.4", "pytimeparse": "1.1.10", "inflection": "0.5.1",
         "schema": "0.7.8", "ordered-set": "4.1.0", "sortedcontainers": "2.4.0", "cachetools": "7.2.3", "toolz": "1.2.0",

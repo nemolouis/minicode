@@ -1,4 +1,4 @@
-# 04 · `miniagent/client.py`:和模型对话的 HTTP 客户端
+# 04 · `minicode/client.py`:和模型对话的 HTTP 客户端
 
 **作用**:把"消息列表 + 工具说明书"通过 HTTP 发给 DeepSeek 的 `/chat/completions` 接口,把返回的 JSON 整理成项目内部用的简单对象。只用标准库,没有第三方依赖。
 

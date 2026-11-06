@@ -4,14 +4,14 @@ import json
 
 import pytest
 
-from miniagent import session as sess
-from miniagent.agent import Agent
-from miniagent.client import ModelResponse, ToolCall
-from miniagent.features import EXPLORE_PROMPT
-from miniagent.permissions import Permissions
-from miniagent.provenance import provenance
-from miniagent.tools import Workspace
-from miniagent.trajectory import SCHEMA_VERSION, Trajectory, read_events, validate_events
+from minicode import session as sess
+from minicode.agent import Agent
+from minicode.client import ModelResponse, ToolCall
+from minicode.features import EXPLORE_PROMPT
+from minicode.permissions import Permissions
+from minicode.provenance import provenance
+from minicode.tools import Workspace
+from minicode.trajectory import SCHEMA_VERSION, Trajectory, read_events, validate_events
 
 
 def call(cid, name, **inp): return ToolCall(cid, name, json.dumps(inp))
@@ -123,7 +123,7 @@ def test_rewind_and_resume_branch_is_valid_and_overlap_without_rewind_is_not(tmp
 
 
 def test_check_trajectories_command(rich, tmp_path, capsys):
-    from miniagent.eval.cli import main
+    from minicode.eval.cli import main
     ev, base = rich
     assert main(["check-trajectories", str(base / "run")]) == 0
     assert "2/2 valid" in capsys.readouterr().out      # the run and its explore-1 sub-agent trajectory

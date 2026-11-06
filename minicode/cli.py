@@ -61,7 +61,7 @@ def _make_sandbox(kind: str | None, workspace: str):
             raise SandboxUnavailable(f"--sandbox {kind} is not available on this machine" + (f" (this one has: {have})" if have else ""))
         return localsandbox.LocalSandbox(workspace, mechanism=kind)
     if not available():
-        raise SandboxUnavailable("the sandbox image is missing or Docker is not running (build it with: miniagent-eval sandbox-build)")
+        raise SandboxUnavailable("the sandbox image is missing or Docker is not running (build it with: minicode-eval sandbox-build)")
     return Sandbox(workspace)
 
 
@@ -81,7 +81,7 @@ def _new_run_dir(root: Path) -> Path:
 
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(prog="miniagent")
+    ap = argparse.ArgumentParser(prog="minicode")
     ap.add_argument("task", nargs="?", help="what the agent should do (with --resume: the follow-up instruction)")
     ap.add_argument("-w", "--workspace", default=".", help="repo root the agent may touch")
     ap.add_argument("-m", "--model", default=DEFAULT_MODEL)
@@ -109,12 +109,12 @@ def main(argv=None) -> int:
     ap.add_argument("--stuck-warn", type=int, default=0, metavar="N",
                     help="after N identical calls with identical results in a row, tell the model (0 = off); the run stops at --stuck-stop")
     ap.add_argument("--stuck-stop", type=int, default=6, metavar="N", help="end the run with status 'stuck' after N such repeats")
-    ap.add_argument("--git", action="store_true", help="work on a new branch miniagent/<run> and commit after every step that changed files "
+    ap.add_argument("--git", action="store_true", help="work on a new branch minicode/<run> and commit after every step that changed files "
                     "(needs a git repository with a clean tree; nothing is pushed)")
     ap.add_argument("--api-style", choices=["openai", "anthropic", "gemini"], default=None,
                     help="wire protocol (default openai-compatible, key from LLM_API_KEY / DEEPSEEK_API_KEY; anthropic: ANTHROPIC_API_KEY)")
     ap.add_argument("--ui", choices=["auto", "tui", "repl"], default="auto",
-                    help="interactive mode (no task given): tui = the full-screen terminal app (needs: pip install 'miniagent[tui]'), "
+                    help="interactive mode (no task given): tui = the full-screen terminal app (needs: pip install 'minicode[tui]'), "
                          "repl = plain line-by-line, auto = tui when Textual is installed and this is a terminal")
     ap.add_argument("--stream", action="store_true", help="print the model's reply as it is generated (OpenAI-compatible endpoints)")
     ap.add_argument("--output-budget", action="store_true", help="shrink the size of one tool output as the context fills up")
@@ -231,7 +231,7 @@ def main(argv=None) -> int:
             from . import tui
             use_tui = args.ui == "tui" or (args.ui == "auto" and tui.available() and sys.stdin.isatty() and sys.stdout.isatty())
             if use_tui and not tui.available():
-                print("error: the terminal UI needs Textual: pip install 'miniagent[tui]'  (or use --ui repl)", file=sys.stderr)
+                print("error: the terminal UI needs Textual: pip install 'minicode[tui]'  (or use --ui repl)", file=sys.stderr)
                 return 2
             if use_tui:
                 from .controller import SessionController
@@ -239,7 +239,7 @@ def main(argv=None) -> int:
                                         new_run_dir=lambda: _new_run_dir(Path(args.runs_dir)), resume=resume, git=git, price=price)
                 tui.run(ctl, auto_approve=args.yes)
                 if ctl.turns:
-                    print(f"session: {ctl.run_dir}\ncontinue later with: miniagent -w {args.workspace} --resume {ctl.run_dir}")
+                    print(f"session: {ctl.run_dir}\ncontinue later with: minicode -w {args.workspace} --resume {ctl.run_dir}")
                     if git is not None:
                         print(git.summary())
                 return 0
@@ -252,7 +252,7 @@ def main(argv=None) -> int:
     if not args.stream:                              # with --stream the text has already been printed as it arrived
         print(res.final_text)
     if res.status == "interrupted":
-        print(f"interrupted; continue with: miniagent \"<next instruction>\" -w {args.workspace} --resume {run_dir}")
+        print(f"interrupted; continue with: minicode \"<next instruction>\" -w {args.workspace} --resume {run_dir}")
         print(f"trajectory: {run_dir / 'trajectory.jsonl'}")
         return 130
     if git is not None:

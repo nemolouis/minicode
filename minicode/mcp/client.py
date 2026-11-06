@@ -26,7 +26,7 @@ from ..tools import Tool, ToolError
 
 MODERN_VERSION = "2026-07-28"
 LEGACY_VERSION = "2025-11-25"
-CLIENT_INFO = {"name": "miniagent", "version": "0.1.0"}
+CLIENT_INFO = {"name": "minicode", "version": "0.1.0"}
 _EOF = object()
 
 

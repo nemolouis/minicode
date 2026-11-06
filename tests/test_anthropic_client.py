@@ -5,7 +5,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
-from miniagent.client import ANTHROPIC_BASE_URL, ANTHROPIC_VERSION, APIError, ChatClient
+from minicode.client import ANTHROPIC_BASE_URL, ANTHROPIC_VERSION, APIError, ChatClient
 
 
 class Server:
@@ -205,8 +205,8 @@ def test_streaming_error_event_and_empty_stream(serve):
 
 
 def test_agent_runs_against_the_anthropic_client(serve, tmp_path):
-    from miniagent.agent import Agent
-    from miniagent.tools import Workspace
+    from minicode.agent import Agent
+    from minicode.tools import Workspace
     (tmp_path / "f.txt").write_text("hello\n")
     s = serve(reply([{"type": "tool_use", "id": "tu1", "name": "read_file", "input": {"path": "f.txt"}}], stop="tool_use"),
               reply([{"type": "text", "text": "The file says hello."}]))

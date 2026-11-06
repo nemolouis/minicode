@@ -1,4 +1,4 @@
-# mini-agent
+# minicode
 
 Status: M1 and M3 done, M4 (this MCP server) in progress.
 

@@ -1,10 +1,10 @@
-# mini-agent
+# minicode
 
 一个从零手写的最小 coding agent，附带评测 harness。不依赖 LangChain 等 agent 框架，目标是**用数据说明 agent 好不好，以及每次改动带来了多少变化**。
 
 > 状态：M1–M4（agent、评测、回放、MCP）已完成；M5（可验证任务生成 → 轨迹合成 → SFT → 评测）**闭环跑通了一圈，效果很小且统计上不显著**：任务、沙箱、轨迹合成、导出、LoRA 训练（第三次成功，前两次发散）、训练前后评测都做了。在 dev 的 48 题（两个未见过的库）上，学生模型从 **0/48 到 4/48**（Fisher/McNemar p≈0.12，**不显著**）；明确的是行为变化：训练前一次工具调用都没有，训练后 48 次都在用工具、8 次改了文件。数据消融和 test 集没做。**之后又做了三轮改进（edit_file 提示、缩短 old_string、普通文本工具调用格式），都没有提高通过数；最有价值的发现是 `<tool_call>` 标记 token 未训练导致工具调用不稳定，4/48 不应当作稳定能力引用，下层部分到此收工（理由见 [docs/next_phase_plan.md](docs/next_phase_plan.md) 末尾）。** 下面所有数字都来自真实运行，样本小的地方标了区间；两个 test 集（手写题 17 题、生成题 47 题）**都还没有跑过**。范围与验收标准见 [PROJECT.md](PROJECT.md)，M5 的计划与逐步记录见 [docs/next_phase_plan.md](docs/next_phase_plan.md)。
 
-**这个项目是什么**：一个标准库实现的 coding agent（`miniagent/` 约 4.2k 行（不含可选的服务），无 agent 框架、无第三方 SDK；只有可选的 `miniagent/server.py` 用到 FastAPI、训练脚本 `scripts/sft_mlx.py` 用到 MLX，装在单独的环境里），加上能回答"改动到底有没有用"的评测与回放工具，以及一个按"参数是攻击者输入"设计的 MCP 服务器。它的价值不在于分数，而在于**每个结论都有运行记录、预测先写后跑、预测错了也记下来**：15 条失败案例里有 loop 自己的 bug、harness 的 bug、我出的题的 bug，也有模型的行为问题。
+**这个项目是什么**：一个标准库实现的 coding agent（`minicode/` 约 4.2k 行（不含可选的服务），无 agent 框架、无第三方 SDK；只有可选的 `minicode/server.py` 用到 FastAPI、训练脚本 `scripts/sft_mlx.py` 用到 MLX，装在单独的环境里），加上能回答"改动到底有没有用"的评测与回放工具，以及一个按"参数是攻击者输入"设计的 MCP 服务器。它的价值不在于分数，而在于**每个结论都有运行记录、预测先写后跑、预测错了也记下来**：15 条失败案例里有 loop 自己的 bug、harness 的 bug、我出的题的 bug，也有模型的行为问题。
 
 ```
 任务（repo + 隐藏测试） ─▶ agent 循环 ─▶ 轨迹 JSONL ─▶ 规则化判分 / 失败归因 ─▶ 报告、配对对比
@@ -19,13 +19,13 @@
 |---|---|---|
 | M1 agent 主循环与工具 | 完成 | 见 [docs/features.md](docs/features.md)；全仓库 842 个测试（不调用模型；需要 Docker 的测试在没有 Docker 时自动跳过，当前环境 809 通过、33 跳过） |
 | M2 评测 harness | 完成 | 任务集、dev/test 划分、隐藏测试、规则化判分、配对对比、断点续跑；实验结果见 [docs/eval.md](docs/eval.md)；test 集未跑 |
-| M3 轨迹回放 | 完成 | `miniagent-eval view`：浏览所有运行、逐步回放、两次运行并排对比；未做按条件导出轨迹 |
+| M3 轨迹回放 | 完成 | `minicode-eval view`：浏览所有运行、逐步回放、两次运行并排对比；未做按条件导出轨迹 |
 | M4 MCP server | 完成 | 手写的 MCP 笔记服务器 + 客户端（stdio 和 Streamable HTTP）+ 越界/越权测试（见 [docs/mcp-and-service.md](docs/mcp-and-service.md)）；已用官方 `mcp` SDK 2.3.0 做双向互操作检查（17/17，见 `scripts/mcp_interop.py`） |
 | M5-a 回放、沙箱、任务生成 | 完成 | 确定性回放；Docker 沙箱（有逃逸测试）；变异式任务生成，352 题全部在沙箱里通过 verify |
 | M5-b teacher 轨迹合成与导出 | 完成 | DeepSeek flash 在 257 道 train 题上 2 次采样，513/514 通过，导出 510 条训练样本 |
 | M5-c LoRA 训练 | 完成（第 3 次） | 本机 MLX、4 位基础权重、只对助手轮算 loss、只训练最后 16 层。前两次发散（原因线索见 docs/next_phase_plan.md）；第三次 456 步没有发散，验证损失 2.10 → 0.74 |
 | M5-d 训练后评测与消融 | 评测做了，下层已收工；消融和 test 没做 | dev：基础 0/48，训练后 4/48（p≈0.12，不显著）。34 个 `no_edit` 里 `edit_file` 29/31 次报错、20 个仍声称已修好。后续三轮改进实验（edit_file 提示、缩短 old_string、普通文本工具调用格式）都没有提高通过数，见 [docs/sft-pipeline.md](docs/sft-pipeline.md) 的"后续实验" |
-| HTTP 服务（可选） | 完成 | `miniagent/server.py`（FastAPI，`pip install -e ".[serve]"`）：提交任务、查状态、轨迹轮询/SSE、取 diff；路径白名单 + 在目录拷贝上运行 + bash 只进沙箱；19 个测试；没用真实模型端到端跑过（见 [docs/mcp-and-service.md](docs/mcp-and-service.md)） |
+| HTTP 服务（可选） | 完成 | `minicode/server.py`（FastAPI，`pip install -e ".[serve]"`）：提交任务、查状态、轨迹轮询/SSE、取 diff；路径白名单 + 在目录拷贝上运行 + bash 只进沙箱；19 个测试；没用真实模型端到端跑过（见 [docs/mcp-and-service.md](docs/mcp-and-service.md)） |
 
 ## 主要发现
 
@@ -38,7 +38,7 @@
 ## 快速开始
 
 ```bash
-git clone <this-repo> && cd mini-agent
+git clone <this-repo> && cd minicode
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"          # 想用 HTTP 服务再加：pip install -e ".[dev,serve]"
 
@@ -55,7 +55,7 @@ scripts/run_task.sh 01 -y          # 在一个任务上运行 agent 并判分
 对任意仓库直接使用：
 
 ```bash
-miniagent "修复 stats.py 里 moving_average 的 bug" -w path/to/repo -m <model>
+minicode "修复 stats.py 里 moving_average 的 bug" -w path/to/repo -m <model>
 ```
 
 常用参数：`--max-steps`、`-y`（自动批准写/改/命令，黑名单仍生效）、`--context-limit`（调低可触发压缩）、`--keep-recent`。
@@ -64,7 +64,7 @@ miniagent "修复 stats.py 里 moving_average 的 bug" -w path/to/repo -m <model
 
 ```bash
 pip install -e ".[tui]"                       # 界面用 Textual，是可选依赖；核心 agent 仍然零依赖
-miniagent -w path/to/repo -m <model> --git --sandbox auto
+minicode -w path/to/repo -m <model> --git --sandbox auto
 ```
 
 ![对话：工具调用卡片、diff、Markdown、侧栏](docs/img/tui-conversation.svg)
@@ -90,8 +90,8 @@ miniagent -w path/to/repo -m <model> --git --sandbox auto
 ## 目录结构
 
 ```
-mini-agent/
-├── miniagent/          # agent.py 主循环；executor.py 工具执行；compaction.py 压缩；session.py 会话与检查点；features.py 可选功能；
+minicode/
+├── minicode/          # agent.py 主循环；executor.py 工具执行；compaction.py 压缩；session.py 会话与检查点；features.py 可选功能；
 │   │                   #   tools / permissions / schema / safety；trajectory.py 事件格式；provenance.py；client / sandbox / replay
 │   ├── eval/           # 评测 harness；config.py 严格配置；view.py + viewer/ 回放页；export.py 导出 SFT 数据
 │   ├── server.py       # 可选的 HTTP 服务（FastAPI），见 docs/mcp-and-service.md
@@ -130,7 +130,7 @@ agent 会执行模型生成的命令，存在风险：
 - 危险命令黑名单只是**纵深防御**，容易被绕过（如通过解释器间接执行），不能当作安全边界。
 - 文件工具限制在工作区内；不加 `--sandbox` 时 `bash` **不受**路径限制。
 - 默认在宿主机直接执行命令；加 `--sandbox` 才会进容器（见上）。不加时请只在不含敏感数据的目录运行，用临时副本做评测（`run_task.sh` 与 harness 都是这样做的）。
-- HTTP 服务（`miniagent-serve`）是远程执行入口：客户端只能选启动时白名单里的工作区名，每次在拷贝上运行；bash 只在 Docker 沙箱里跑（`--no-sandbox` 时直接拒绝 bash）；默认只监听 127.0.0.1，非本机地址必须设置 `MINIAGENT_API_KEY`。它不是生产级服务：单进程、运行记录在内存里、没有限流和计费。
+- HTTP 服务（`minicode-serve`）是远程执行入口：客户端只能选启动时白名单里的工作区名，每次在拷贝上运行；bash 只在 Docker 沙箱里跑（`--no-sandbox` 时直接拒绝 bash）；默认只监听 127.0.0.1，非本机地址必须设置 `MINICODE_API_KEY`。它不是生产级服务：单进程、运行记录在内存里、没有限流和计费。
 - 使用第三方中转时，你的密钥和全部请求都会经过它。例如 `gemini-balance-lite` 会把选中的密钥完整写进函数日志；只用自己部署的实例和专用密钥。客户端不会把 `DEEPSEEK_API_KEY` 发给 DeepSeek 以外的主机。
 - Gemini 免费档的输入输出可能被 Google 用于改进产品并被人工审阅（条款原文），不要用来处理私有代码。
 
@@ -168,7 +168,7 @@ agent 会执行模型生成的命令，存在风险：
 - [x] 上述功能在 flash 上的 dev 评测（见 [docs/eval.md](docs/eval.md) 的"可选功能的评测结果"）：功能几乎没被触发，结果在噪声内
 - [x] 工程化（2026-11）：评测配置严格校验、运行溯源、轨迹格式版本与校验器、黄金轨迹回放回归、CI + ruff + Python 3.10–3.13、`agent.py` 拆分为主循环 / 执行器 / 压缩 / 会话、查看器认识新事件、results 索引；见 [docs/development.md](docs/development.md)
 - [x] 第二轮对标补缺（2026-11）：卡住检测、花费上限、`apply_patch`、输出分页与按上下文缩放的输出上限、后台命令、`symbols` 大纲、流式输出与 Ctrl-C 可恢复（有测试和变异检验；**没有用真实模型评测过**，见 [docs/features.md](docs/features.md)）
-- [x] 第三轮（2026-11）：`compare` 的按运行检验与噪声警告、噪声下限报告（`miniagent-eval noise`）、覆盖率进 CI、`--git` 分支与提交、不依赖 Docker 的系统沙箱（seatbelt / bwrap）、Anthropic 原生协议、**交互式终端客户端**（`miniagent` 不带任务）；有测试和变异检验，真实模型与真实 Anthropic / Linux bwrap 都**没有验证过**
+- [x] 第三轮（2026-11）：`compare` 的按运行检验与噪声警告、噪声下限报告（`minicode-eval noise`）、覆盖率进 CI、`--git` 分支与提交、不依赖 Docker 的系统沙箱（seatbelt / bwrap）、Anthropic 原生协议、**交互式终端客户端**（`minicode` 不带任务）；有测试和变异检验，真实模型与真实 Anthropic / Linux bwrap 都**没有验证过**
 - [ ] 在弱模型上评测先读后改 / todo / explore（flash 上无信息量）；跑一次 test 集
 - [ ] 上下文工程(可选):摘要 vs 结构化笔记
 

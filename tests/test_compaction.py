@@ -1,7 +1,7 @@
 """The compaction module on its own (the loop-level behaviour is covered in test_agent_loop.py and the golden replays)."""
-from miniagent import compaction
-from miniagent.client import ModelResponse
-from miniagent.trajectory import Trajectory
+from minicode import compaction
+from minicode.client import ModelResponse
+from minicode.trajectory import Trajectory
 
 
 class Summariser:

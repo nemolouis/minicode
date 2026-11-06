@@ -5,14 +5,14 @@ import time
 
 import pytest
 
-from miniagent import patch as P
-from miniagent.agent import Agent
-from miniagent.background import MAX_JOBS, BackgroundJobs, JobError
-from miniagent.client import ModelResponse, ToolCall
-from miniagent.permissions import Permissions
-from miniagent.symbols import outline
-from miniagent.tools import ToolError, Workspace
-from miniagent.trajectory import Trajectory
+from minicode import patch as P
+from minicode.agent import Agent
+from minicode.background import MAX_JOBS, BackgroundJobs, JobError
+from minicode.client import ModelResponse, ToolCall
+from minicode.permissions import Permissions
+from minicode.symbols import outline
+from minicode.tools import ToolError, Workspace
+from minicode.trajectory import Trajectory
 
 
 def call(cid, name, **inp): return ToolCall(cid, name, json.dumps(inp))

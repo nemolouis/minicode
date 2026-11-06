@@ -4,9 +4,9 @@ import math
 
 import pytest
 
-from miniagent.eval.noise import NoiseError, markdown_noise, noise_report
-from miniagent.eval.report import compare, markdown_compare
-from miniagent.eval.stats import fisher_exact, mean_sd, sign_flip_test, verdict, wilson
+from minicode.eval.noise import NoiseError, markdown_noise, noise_report
+from minicode.eval.report import compare, markdown_compare
+from minicode.eval.stats import fisher_exact, mean_sd, sign_flip_test, verdict, wilson
 
 
 # ---------------------------------------------------------------- the tests themselves
@@ -30,7 +30,7 @@ def test_sign_flip_exact():
 def test_sign_flip_monte_carlo_agrees_with_exact_in_the_region_both_can_handle():
     d = [1.0] * 12 + [-1.0] * 3 + [0.5] * 2 + [0.0] * 5                              # 17 non-zero differences: above EXACT_LIMIT
     p_mc = sign_flip_test(d, samples=40_000)
-    import miniagent.eval.stats as S
+    import minicode.eval.stats as S
     old = S.EXACT_LIMIT
     S.EXACT_LIMIT = 20
     try:
@@ -152,7 +152,7 @@ def test_noise_report_refuses_things_that_are_not_replicates(tmp_path):
 
 
 def test_noise_command(tmp_path, capsys):
-    from miniagent.eval.cli import main
+    from minicode.eval.cli import main
     a, b = write_dir(tmp_path, "r1", FLASH), write_dir(tmp_path, "r2", TODO)
     out = tmp_path / "noise.md"
     assert main(["noise", str(a), str(b), "--out", str(out)]) == 0

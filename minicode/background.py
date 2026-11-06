@@ -38,9 +38,9 @@ class Job:
 
 class BackgroundJobs:
     def __init__(self, cwd: Path, env: dict | None = None, argv_for=None):
-        """`argv_for(command)` -> the full argv that runs it inside an OS sandbox (miniagent.localsandbox); without it `sh -c` is used."""
+        """`argv_for(command)` -> the full argv that runs it inside an OS sandbox (minicode.localsandbox); without it `sh -c` is used."""
         self.cwd, self.env, self.argv_for = Path(cwd), env, argv_for
-        self._dir = Path(tempfile.mkdtemp(prefix="miniagent-bg-"))
+        self._dir = Path(tempfile.mkdtemp(prefix="minicode-bg-"))
         self._jobs: dict[str, Job] = {}
         self._n = 0
         self._lock = threading.Lock()

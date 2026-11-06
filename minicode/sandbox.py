@@ -19,8 +19,8 @@ from pathlib import Path
 
 from .proc import ShellResult
 
-IMAGE = "miniagent-sandbox:py312"
-LABEL = "miniagent-sandbox=1"
+IMAGE = "minicode-sandbox:py312"
+LABEL = "minicode-sandbox=1"
 SYNC_SECONDS = 10.0             # how long a command waits for the container to see the host's version of the workspace
 OUTPUT_CAP = 2_000_000          # bytes kept per stream; the rest is read and dropped so a flood cannot fill host memory
 _live: set[str] = set()
@@ -66,7 +66,7 @@ exp=$(mktemp /tmp/manifest.XXXXXX); cat > "$exp"
 i=0
 while ! find . -type f -not -path '*/__pycache__/*' -not -path './.pytest_cache/*' -printf '%P\t%s\t%Ts\n' | LC_ALL=C sort | cmp -s - "$exp"; do
   i=$((i+1))
-  if [ "$i" -ge "$3" ]; then echo "miniagent-sandbox: workspace view did not converge" >&2; exit 97; fi
+  if [ "$i" -ge "$3" ]; then echo "minicode-sandbox: workspace view did not converge" >&2; exit 97; fi
   sleep 0.05
 done
 rm -f "$exp"

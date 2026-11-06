@@ -4,12 +4,12 @@ import json
 
 import pytest
 
-from miniagent.agent import Agent
-from miniagent.budget import Budget
-from miniagent.client import ModelResponse, ToolCall
-from miniagent.stuck import StuckDetector
-from miniagent.tools import Workspace
-from miniagent.trajectory import Trajectory
+from minicode.agent import Agent
+from minicode.budget import Budget
+from minicode.client import ModelResponse, ToolCall
+from minicode.stuck import StuckDetector
+from minicode.tools import Workspace
+from minicode.trajectory import Trajectory
 
 
 def call(cid, name, **inp): return ToolCall(cid, name, json.dumps(inp))
@@ -121,7 +121,7 @@ def test_edit_between_identical_test_runs_does_not_trigger(tmp_path):
 
 
 def test_classify_knows_the_new_statuses():
-    from miniagent.eval.grade import classify
+    from minicode.eval.grade import classify
     for status, cls in (("stuck", "stuck"), ("budget", "over_budget")):
         assert classify([{"event": "run_end", "status": status}], False, False, []) == cls
     assert classify([{"event": "run_end", "status": "stuck"}], True, False, []) == "pass"
@@ -173,7 +173,7 @@ def test_subagent_tokens_count_towards_the_limit(tmp_path):
 
 # ---------------------------------------------------------------- configuration plumbing
 def test_config_keys_are_validated():
-    from miniagent.eval.config import validate_config
+    from minicode.eval.config import validate_config
     ok = {"name": "t", "model": "m"}
     assert validate_config({**ok, "stuck_warn_after": 3, "stuck_stop_after": 6, "max_cost_usd": 0.5, "max_total_tokens": 1000,
                             "price_tier": "peak"}, check_files=False) == []
@@ -184,7 +184,7 @@ def test_config_keys_are_validated():
 
 
 def test_budget_from_config(tmp_path):
-    from miniagent.eval.runner import budget_from_config
+    from minicode.eval.runner import budget_from_config
     assert budget_from_config({"model": "m"}) is None
     assert budget_from_config({"model": "m", "max_total_tokens": 10}).max_total_tokens == 10
     prices = tmp_path / "p.json"
@@ -199,7 +199,7 @@ def test_budget_from_config(tmp_path):
 
 
 def test_cli_flags(tmp_path, monkeypatch, capsys):
-    from miniagent import cli
+    from minicode import cli
     (tmp_path / "w").mkdir()
     prices = tmp_path / "p.json"
     prices.write_text(json.dumps({"fake": {"off_peak": PRICE}}))
@@ -218,7 +218,7 @@ def test_cli_flags(tmp_path, monkeypatch, capsys):
 
 
 def test_two_cli_runs_in_the_same_second_get_separate_run_directories(tmp_path, monkeypatch):
-    from miniagent import cli
+    from minicode import cli
     (tmp_path / "w").mkdir()
     monkeypatch.setattr(cli.time, "strftime", lambda fmt: "20261106-000000")
     for _ in range(2):

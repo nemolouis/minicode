@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from miniagent.client import extract_text_tool_calls
+from minicode.client import extract_text_tool_calls
 
 ROOT = Path(__file__).parent.parent
 PLAIN = ROOT / "prompts" / "chat_template_plain.jinja"

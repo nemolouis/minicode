@@ -25,7 +25,7 @@ jobs:
         if: matrix.python == '3.12'
         run: coverage report --format=markdown >> "$GITHUB_STEP_SUMMARY"
       # the golden trajectories must stay valid against the documented schema
-      - run: miniagent-eval check-trajectories tests/golden
+      - run: minicode-eval check-trajectories tests/golden
 
   sandbox:
     name: docker sandbox tests
@@ -36,7 +36,7 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -e ".[dev]"
-      - run: miniagent-eval sandbox-build
+      - run: minicode-eval sandbox-build
       # with the image present these run for real instead of being skipped
       - run: pytest -q tests/test_sandbox.py tests/test_taskgen.py
 

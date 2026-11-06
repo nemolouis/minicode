@@ -1,4 +1,4 @@
-"""Resumable sessions and file checkpoints (`Agent(session=True)`, `miniagent --resume DIR`, `miniagent --rewind DIR --to-step N`).
+"""Resumable sessions and file checkpoints (`Agent(session=True)`, `minicode --resume DIR`, `minicode --rewind DIR --to-step N`).
 
 Next to `trajectory.jsonl` the agent keeps
   session.json              the message list the model sees, the step counter, the todo list, and for every step the message-list
@@ -121,7 +121,7 @@ def save_session(run_dir: Path, state: dict) -> None:
 def load_session(run_dir: str | Path) -> dict:
     p = Path(run_dir) / "session.json"
     if not p.is_file():
-        raise FileNotFoundError(f"no session.json in {run_dir}: the run was not started with a session (miniagent writes one by default)")
+        raise FileNotFoundError(f"no session.json in {run_dir}: the run was not started with a session (minicode writes one by default)")
     state = json.loads(p.read_text())
     if state.get("version") != VERSION:
         raise ValueError(f"unsupported session version {state.get('version')!r}")

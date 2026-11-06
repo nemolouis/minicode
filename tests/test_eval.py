@@ -4,10 +4,10 @@ from pathlib import Path
 
 import pytest
 
-from miniagent.client import ModelResponse, ToolCall
-from miniagent.eval import grade, report
-from miniagent.eval.runner import run_one
-from miniagent.eval.tasks import Task, apply_split, freeze_split, load_tasks
+from minicode.client import ModelResponse, ToolCall
+from minicode.eval import grade, report
+from minicode.eval.runner import run_one
+from minicode.eval.tasks import Task, apply_split, freeze_split, load_tasks
 
 
 def make_task(root: Path, name="t1", bug=True) -> Task:
@@ -128,7 +128,7 @@ def test_hidden_tests_are_grading_only(tmp_path):
     # visible test passes with f()==2; hidden test additionally requires f() >= 5
     (t.dir / "hidden").mkdir()
     (t.dir / "hidden" / "test_hidden.py").write_text("from m import f\n\ndef test_big():\n    assert f() >= 5\n")
-    from miniagent.eval.tasks import load_tasks
+    from minicode.eval.tasks import load_tasks
     t = load_tasks(tmp_path / "tasks")[0]
     fix = Fake([([call("1", "edit_file", path="m.py", old_string="return 1", new_string="return 2")], "tool_use"),
                 ([text("done")], "end_turn")])
@@ -151,7 +151,7 @@ def test_last_test_green_detection():
 
 
 def test_out_of_balance_is_a_permanent_api_error():
-    from miniagent.eval.cli import _permanent_api_error
+    from minicode.eval.cli import _permanent_api_error
     rec = {"failure_class": "api_error", "error": 'APIError(\'HTTP 402: {"error":{"message":"Insufficient Balance"}}\')'}
     assert _permanent_api_error(rec)
     assert not _permanent_api_error({"failure_class": "api_error", "error": "APIError('HTTP 503: busy')"})
@@ -186,7 +186,7 @@ def test_report_excludes_api_errors_and_resume_dedupes(tmp_path):
 
 
 def test_request_budget_counts_summary_requests(monkeypatch, tmp_path):
-    from miniagent.eval import cli
+    from minicode.eval import cli
     recs = iter([{"steps": 10, "compactions": 3, "failure_class": "pass", "error": None}])
     monkeypatch.setattr(cli, "run_one", lambda *a, **k: next(recs))
     budget = cli._Budget(100)
@@ -196,8 +196,8 @@ def test_request_budget_counts_summary_requests(monkeypatch, tmp_path):
 
 
 def test_a_sandbox_fault_becomes_an_api_error_record_not_a_lost_run(tmp_path, monkeypatch):
-    from miniagent.eval import runner
-    from miniagent.sandbox import SandboxError
+    from minicode.eval import runner
+    from minicode.sandbox import SandboxError
     t = make_task(tmp_path / "tasks")
     c = Fake([([call("1", "edit_file", path="m.py", old_string="return 1", new_string="return 2")], "tool_use"),
               ([text("done")], "end_turn")])

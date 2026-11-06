@@ -2,7 +2,7 @@
 
 Every comparison in this project is a difference between two runs, and a model called at temperature 0 is still not deterministic.
 Until this was measured the only evidence was indirect (an almost-unused feature differed from the baseline by 4 of 39 passes).
-`miniagent-eval noise DIR DIR [DIR ...]` takes result directories of replicate runs (same config hash, same tasks) and reports:
+`minicode-eval noise DIR DIR [DIR ...]` takes result directories of replicate runs (same config hash, same tasks) and reports:
 
 * the pass rate of each replicate, and the largest difference between any two;
 * how many replicate PAIRS the comparison tests (compare.py) would call "different" although nothing changed: the false-alarm rate;

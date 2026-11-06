@@ -11,8 +11,8 @@ pytest.importorskip("fastapi")
 pytest.importorskip("httpx")
 from fastapi.testclient import TestClient  # noqa: E402
 
-from miniagent.client import ModelResponse, ToolCall  # noqa: E402
-from miniagent.server import Service, create_app, main  # noqa: E402
+from minicode.client import ModelResponse, ToolCall  # noqa: E402
+from minicode.server import Service, create_app, main  # noqa: E402
 
 
 def call(i, name, **inp):
@@ -186,7 +186,7 @@ def test_a_workspace_that_does_not_exist_is_refused_at_startup(tmp_path):
 
 
 def test_cli_refuses_a_public_host_without_a_key(tmp_path, ws, monkeypatch, capsys):
-    monkeypatch.delenv("MINIAGENT_API_KEY", raising=False)
+    monkeypatch.delenv("MINICODE_API_KEY", raising=False)
     assert main(["--workspace", f"demo={ws}", "--host", "0.0.0.0", "--no-sandbox"]) == 2
-    assert "MINIAGENT_API_KEY" in capsys.readouterr().err
+    assert "MINICODE_API_KEY" in capsys.readouterr().err
     assert main(["--workspace", "demo=" + str(tmp_path / "missing"), "--no-sandbox"]) == 2

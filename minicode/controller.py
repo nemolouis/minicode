@@ -70,7 +70,7 @@ class SessionController:
         self.tokens = {"in": 0, "out": 0}
         self.turns = 0
         self.agent = None
-        self._baseline = Path(tempfile.mkdtemp(prefix="miniagent-base-"))
+        self._baseline = Path(tempfile.mkdtemp(prefix="minicode-base-"))
         self._exclude: list[str] = []
         self._hooks: dict = {}
 

@@ -5,10 +5,10 @@
 ## 评测（M2）
 
 ```bash
-miniagent-eval run --config configs/flash.json --split dev --tasks b --repeat 3 --workers 4
-miniagent-eval report results/<run-id>
-miniagent-eval compare results/<run-a> results/<run-b>
-miniagent-eval verify              # 每题：初始必须失败、参考解必须通过
+minicode-eval run --config configs/flash.json --split dev --tasks b --repeat 3 --workers 4
+minicode-eval report results/<run-id>
+minicode-eval compare results/<run-a> results/<run-b>
+minicode-eval verify              # 每题：初始必须失败、参考解必须通过
 ```
 
 - **任务**：`tasks/<id>/{task.json, repo/, hidden/, solution/}`。`solution/` 只用于验证题目可解，`hidden/` 是只在判分时放入的隐藏测试，agent 都看不到。A 层（`01`～`15`）是自建小题，B 层（`b01`～`b26`）是 2～5 文件的规格驱动题，关键行为写在 `docs/` 或 docstring 里。第二批 B 题的隐藏测试多用暴力解、Python 标准库或数学性质做独立判分器。共 41 个目录，2 个已退役（见案例 10），在用 39 个。
@@ -104,7 +104,7 @@ miniagent-eval verify              # 每题：初始必须失败、参考解必�
 
 ## 比较两次运行，以及噪声下限
 
-`miniagent-eval compare A B` 除了按题的自助法区间，现在还给出两个检验和一个结论：
+`minicode-eval compare A B` 除了按题的自助法区间，现在还给出两个检验和一个结论：
 
 - **按题的配对符号翻转检验**（统计单位是题；有差异的题不超过 16 道时是精确检验，否则蒙特卡洛）；
 - **合并全部运行的 Fisher 精确检验**（把运行当独立样本，偏乐观，作为交叉检验）；
@@ -112,4 +112,4 @@ miniagent-eval verify              # 每题：初始必须失败、参考解必�
 
 这个改动的原因是 2026-11-06 的 todo 对比：自助法说 +10.3 点、区间 2.6 到 17.9（"显著"），而同样的数据按配对检验 p=0.125、按运行 Fisher p=0.115。现在对同一份数据，`compare` 会给出 `inconclusive` 加警告。
 
-`miniagent-eval noise DIR DIR [DIR ...]` 用同一配置、同一任务的重复运行量噪声下限：每次重复的通过率、任意两次之间的最大差、**没改任何东西时 compare 的检验有几次说"不同"**（误报率）、有时过有时不过的题。`scripts/run_noise.sh [配置名] [次数]` 一条命令跑完（flash 每次约 $0.25）。拒绝配置哈希或任务不同的目录。**这个功能的统计部分有测试，但还没有用真实运行量过噪声下限。**
+`minicode-eval noise DIR DIR [DIR ...]` 用同一配置、同一任务的重复运行量噪声下限：每次重复的通过率、任意两次之间的最大差、**没改任何东西时 compare 的检验有几次说"不同"**（误报率）、有时过有时不过的题。`scripts/run_noise.sh [配置名] [次数]` 一条命令跑完（flash 每次约 $0.25）。拒绝配置哈希或任务不同的目录。**这个功能的统计部分有测试，但还没有用真实运行量过噪声下限。**

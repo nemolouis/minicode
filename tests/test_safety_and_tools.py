@@ -1,6 +1,6 @@
 import pytest
-from miniagent.safety import check_command
-from miniagent.tools import ToolError, Workspace
+from minicode.safety import check_command
+from minicode.tools import ToolError, Workspace
 
 
 @pytest.mark.parametrize("cmd", [

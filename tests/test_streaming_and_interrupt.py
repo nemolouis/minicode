@@ -5,11 +5,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
-from miniagent.agent import Agent
-from miniagent.client import APIError, ChatClient, ModelResponse, ToolCall
-from miniagent.session import load_session
-from miniagent.tools import Tool, Workspace
-from miniagent.trajectory import Trajectory
+from minicode.agent import Agent
+from minicode.client import APIError, ChatClient, ModelResponse, ToolCall
+from minicode.session import load_session
+from minicode.tools import Tool, Workspace
+from minicode.trajectory import Trajectory
 
 
 def sse(*chunks, done=True):
@@ -240,7 +240,7 @@ def test_ctrl_c_before_anything_happened(tmp_path):
 
 
 def test_cli_reports_an_interrupted_run_with_a_resume_hint(tmp_path, monkeypatch, capsys):
-    from miniagent import cli
+    from minicode import cli
     (tmp_path / "w").mkdir()
     monkeypatch.setattr(cli, "ChatClient", lambda: Script([(["x"], 10)] if False else ["INTERRUPT"]))
     code = cli.main(["go", "-w", str(tmp_path / "w"), "-m", "fake", "--runs-dir", str(tmp_path / "runs")])
@@ -249,7 +249,7 @@ def test_cli_reports_an_interrupted_run_with_a_resume_hint(tmp_path, monkeypatch
 
 
 def test_cli_stream_prints_text_as_it_arrives(tmp_path, monkeypatch, capsys):
-    from miniagent import cli
+    from minicode import cli
     (tmp_path / "w").mkdir()
 
     class Streaming:

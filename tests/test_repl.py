@@ -4,11 +4,11 @@ import json
 
 import pytest
 
-from miniagent import repl as R
-from miniagent.agent import Agent
-from miniagent.client import ModelResponse, ToolCall
-from miniagent.repl import Repl, Terminal, describe_action, workspace_diff
-from miniagent.tools import Workspace
+from minicode import repl as R
+from minicode.agent import Agent
+from minicode.client import ModelResponse, ToolCall
+from minicode.repl import Repl, Terminal, describe_action, workspace_diff
+from minicode.tools import Workspace
 
 
 def call(cid, name, **inp): return ToolCall(cid, name, json.dumps(inp))
@@ -77,7 +77,7 @@ def go(*a, **kw):
 def test_a_turn_prints_the_answer_and_a_summary_and_exit_leaves(env):
     r, client, out = go(env, [(["Hello there."], 100)], ["hi", "/exit"])
     assert "Hello there." in out and "[done] 1 steps total, 100 in / 7 out tokens" in out
-    assert "continue later with: miniagent" in out and str(r.run_dir) in out
+    assert "continue later with: minicode" in out and str(r.run_dir) in out
     assert len(client.calls) == 1
 
 
@@ -206,7 +206,7 @@ def test_diff_marks_deleted_files(env):
 
 def test_workspace_diff_ignores_the_run_directory_and_binary_files(env):
     tmp, w = env
-    from miniagent import session as sess
+    from minicode import session as sess
     (w / "bin.dat").write_bytes(b"\x00\x01\xff")
     base = tmp / "base"
     sess.snapshot(w, base, exclude=["runs"])
@@ -279,7 +279,7 @@ def test_clear_starts_a_new_session_directory(env):
 def test_resume_continues_a_saved_session(env):
     tmp, w = env
     r1, _, _ = go(env, [(["first answer"], 1)], ["remember the word banana"])
-    from miniagent.session import load_session
+    from minicode.session import load_session
     state = load_session(r1.run_dir)
     r2, client, out = start(env, [(["second answer"], 1)], ["what word?"], resume=state, run_dir=r1.run_dir)
     r2.run()
@@ -322,7 +322,7 @@ def test_colour_diff_lines():
 
 # ---------------------------------------------------------------- the command line
 def test_cli_without_a_task_starts_the_interactive_client(env, monkeypatch, capsys):
-    from miniagent import cli
+    from minicode import cli
     tmp, w = env
     monkeypatch.setattr(cli, "ChatClient", lambda: Script([(["Hi from the model"], 10)]))
     monkeypatch.setattr("sys.stdin", io.StringIO("hello\n/exit\n"))
@@ -333,14 +333,14 @@ def test_cli_without_a_task_starts_the_interactive_client(env, monkeypatch, caps
 
 
 def test_cli_interactive_needs_the_session_files(env, capsys):
-    from miniagent import cli
+    from minicode import cli
     with pytest.raises(SystemExit):
         cli.main(["-w", str(env[1]), "--no-session"])
     assert "interactive client keeps its conversation" in capsys.readouterr().err
 
 
 def test_cli_interactive_resume_and_yes(env, monkeypatch, capsys):
-    from miniagent import cli
+    from minicode import cli
     tmp, w = env
     monkeypatch.setattr(cli, "ChatClient", lambda: Script([([call("1", "write_file", path="n.txt", content="x")], 1), (["written"], 1)]))
     monkeypatch.setattr("sys.stdin", io.StringIO("make n.txt\n"))
@@ -362,7 +362,7 @@ def test_stuck_detector_events_are_shown(env):
 
 def test_diff_skips_files_too_big_to_have_been_copied(env, monkeypatch):
     tmp, w = env
-    from miniagent import session as sess
+    from minicode import session as sess
     (w / "huge.txt").write_text("x" * 100)
     monkeypatch.setattr(sess, "MAX_FILE_BYTES", 10)
     base = tmp / "base"
@@ -374,7 +374,7 @@ def test_diff_skips_files_too_big_to_have_been_copied(env, monkeypatch):
 
 
 def test_cli_interactive_keeps_background_jobs_between_turns(env, monkeypatch, capsys):
-    from miniagent import cli
+    from minicode import cli
     tmp, w = env
     seen = []
 

@@ -1,4 +1,4 @@
-"""miniagent-eval: split | verify | run | report | view | replay | export | compare | gen | sandbox-build | sandbox-clean"""
+"""minicode-eval: split | verify | run | report | view | replay | export | compare | gen | sandbox-build | sandbox-clean"""
 from __future__ import annotations
 
 import argparse
@@ -27,7 +27,7 @@ def cmd_gen(a):
     from ..sandbox import available
     from ..taskgen.generate import GenConfig, generate
     if not available():
-        raise SystemExit("error: the sandbox image is missing or Docker is not running (miniagent-eval sandbox-build)")
+        raise SystemExit("error: the sandbox image is missing or Docker is not running (minicode-eval sandbox-build)")
     root = Path(a.seeds)
     dirs = sorted(d for d in root.iterdir() if (d / "seed.json").exists())
     if a.only:
@@ -39,7 +39,7 @@ def cmd_gen(a):
     for s in rep["seeds"]:
         print(f"{s['seed']:20} " + (f"SKIPPED: {s['skipped']}" if s.get("skipped") else
               f"{len(s['tasks'])} tasks from {s['candidates']} candidates  split={s['split']}  rejected={s['rejected']}"))
-    print(f"report: {Path(a.out) / 'GEN_REPORT.json'}   next: miniagent-eval --tasks-root {a.out} verify --sandbox")
+    print(f"report: {Path(a.out) / 'GEN_REPORT.json'}   next: minicode-eval --tasks-root {a.out} verify --sandbox")
 
 
 def cmd_sandbox_build(a):
@@ -253,7 +253,7 @@ def cmd_run(a):
                 ex.shutdown(wait=False, cancel_futures=True)
                 print(f"\nSTOPPING: API quota exhausted ({rec['error'][:200]}).\n"
                       f"Results so far are saved. Continue later with:\n"
-                      f"  miniagent-eval run --resume {out}", file=sys.stderr)
+                      f"  minicode-eval run --resume {out}", file=sys.stderr)
                 return 3
             if _permanent_api_error(rec):
                 ex.shutdown(wait=False, cancel_futures=True)
@@ -273,7 +273,7 @@ def cmd_run(a):
           f"report: {out / 'report.md'}")
     if pending:
         print(f"{pending} run(s) still without a valid result (budget/quota/api errors). "
-              f"Continue with: miniagent-eval run --resume {out}")
+              f"Continue with: minicode-eval run --resume {out}")
     return 0
 
 
@@ -292,7 +292,7 @@ def cmd_view(a):
 
 
 def cmd_check(a):
-    """Validate trajectories against the documented schema (miniagent.trajectory); exit 1 if any is invalid."""
+    """Validate trajectories against the documented schema (minicode.trajectory); exit 1 if any is invalid."""
     from ..trajectory import read_events, validate_events
     from .replay import collect
     paths = collect(a.paths)
@@ -370,7 +370,7 @@ def cmd_noise(a):
 def main(argv=None) -> int:
     # Make the venv's tools (pytest) visible to the agent's bash tool and to grading.
     os.environ["PATH"] = f"{Path(sys.executable).parent}{os.pathsep}{os.environ.get('PATH', '')}"
-    ap = argparse.ArgumentParser(prog="miniagent-eval")
+    ap = argparse.ArgumentParser(prog="minicode-eval")
     ap.add_argument("--tasks-root", default="tasks")
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("split", help="freeze dev/test split for tasks not yet in SPLIT.json").set_defaults(fn=cmd_split)
@@ -408,7 +408,7 @@ def main(argv=None) -> int:
     r.add_argument("--prices", default="configs/prices.json")
     r.add_argument("--api-error-retries", type=int, default=2,
                    help="rerun a run that ended in api_error up to N times (server trouble, not a model failure)")
-    r.add_argument("--cassette", help="file that stores model responses by request hash (see miniagent/replay.py)")
+    r.add_argument("--cassette", help="file that stores model responses by request hash (see minicode/replay.py)")
     r.add_argument("--cassette-mode", choices=["auto", "record", "replay"], default="auto",
                    help="auto: reuse a stored response, else call the model and store it; record: always call and store; "
                         "replay: stored responses only (no API key needed, a missing one is an error)")

@@ -6,8 +6,8 @@ import threading
 
 import pytest
 
-from miniagent.mcp import safepath
-from miniagent.mcp.safepath import Denied, Scan, TooLarge, clean_text, make_policy, open_file, read_all, validate_rel
+from minicode.mcp import safepath
+from minicode.mcp.safepath import Denied, Scan, TooLarge, clean_text, make_policy, open_file, read_all, validate_rel
 
 
 @pytest.fixture
@@ -105,7 +105,7 @@ def test_escapes_and_non_notes_are_denied(box, rel):
 def test_fifo_is_denied_and_never_blocks(box):
     """Run in a subprocess with a timeout: a regression here must fail the test, not hang the whole run."""
     _, root, _ = box
-    code = ("import sys\nfrom miniagent.mcp import safepath\n"
+    code = ("import sys\nfrom minicode.mcp import safepath\n"
             "p = safepath.make_policy(sys.argv[1])\n"
             "try:\n    safepath.open_file(p, ['fifo.md'])\nexcept safepath.Denied:\n    print('denied')\n")
     r = subprocess.run([sys.executable, "-c", code, str(root)], capture_output=True, text=True, timeout=15)

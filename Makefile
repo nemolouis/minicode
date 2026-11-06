@@ -27,13 +27,13 @@ lint:
 	ruff check .
 
 golden-check:
-	miniagent-eval check-trajectories tests/golden
+	minicode-eval check-trajectories tests/golden
 
 check: lint test golden-check
 
 golden:
 	$(PY) scripts/make_golden.py
-	miniagent-eval replay tests/golden
+	minicode-eval replay tests/golden
 
 results-index:
 	$(PY) scripts/index_results.py
@@ -45,7 +45,7 @@ evals:
 	scripts/run_feature_evals.sh
 
 sandbox:
-	miniagent-eval sandbox-build
+	minicode-eval sandbox-build
 
 clean:
 	rm -rf .pytest_cache .ruff_cache build dist *.egg-info

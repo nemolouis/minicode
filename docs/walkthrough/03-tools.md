@@ -1,4 +1,4 @@
-# 03 · `miniagent/tools.py`:agent 的"手"
+# 03 · `minicode/tools.py`:agent 的"手"
 
 **作用**:实现 5 个工具(`read_file` / `write_file` / `edit_file` / `bash` / `grep`),以及把它们描述给模型看的 JSON 说明书。
 
@@ -7,7 +7,7 @@
 ## 第 1–19 行:导入和常量
 
 - 第 9–14 行:`os`(环境变量)、`re`(正则)、`subprocess`(执行外部命令)、`dataclass`、`Path`、`Callable`(表示"可调用对象"的类型)。
-- 第 16 行 `from .safety import check_command`:开头的 `.` 表示"同一个包里的",即 `miniagent/safety.py`。
+- 第 16 行 `from .safety import check_command`:开头的 `.` 表示"同一个包里的",即 `minicode/safety.py`。
 - 第 18 行 `MAX_OUTPUT_CHARS = 20_000`:数字里的下划线只是为了好读,等于 20000。输出超过这个长度会被截断,避免一次工具输出把上下文撑爆。
 - 第 19 行 `SKIP_DIRS = {...}`:大括号里是逗号分隔的元素 → 这是**集合**(set)。`grep` 时跳过这些目录。
 

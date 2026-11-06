@@ -1,6 +1,6 @@
 # Third-party material
 
-mini-agent itself is MIT-licensed (see `LICENSE`). The repository also contains source code of the open-source libraries
+minicode itself is MIT-licensed (see `LICENSE`). The repository also contains source code of the open-source libraries
 below. It is used as *seed libraries* for the task generator: `seeds/<name>/repo/` holds the library with its own tests, and
 the generated tasks (`gen_tasks/`, not committed, see `gen_tasks/README.md`) hold the same code with one injected bug. The
 license text of each library is kept next to its code (`seeds/<name>/repo/<license file>`) and applies to that code, not to

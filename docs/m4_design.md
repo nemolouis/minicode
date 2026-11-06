@@ -30,7 +30,7 @@
 
 **决定**：服务端**同时支持两代**（新版 + 旧版握手），客户端按规范的探测流程。成本很小（旧版多一个 `initialize` 和一个通知），收益是现有客户端都能连。
 
-## 3. 服务端：`miniagent/mcp/notes_server.py`
+## 3. 服务端：`minicode/mcp/notes_server.py`
 
 数据源：一个笔记目录（`--root`），默认只认 `.md`、`.txt`、`.rst`。
 
@@ -63,8 +63,8 @@
 
 ## 5. 客户端与 agent 集成
 
-**`miniagent/mcp/client.py`**（标准库）：
-- 以 `shell=False`、独立进程组启动服务端（复用 `miniagent/proc.py` 的进程组清理），环境变量最小化；
+**`minicode/mcp/client.py`**（标准库）：
+- 以 `shell=False`、独立进程组启动服务端（复用 `minicode/proc.py` 的进程组清理），环境变量最小化；
 - 启动探测：`server/discover` → 否则回退 `initialize` + `notifications/initialized`；
 - 每个请求有超时（默认 20 秒），超时发 `notifications/cancelled`；
 - `tools/list` 处理分页；`call_tool` 把 `content` 里的文字拼起来，`isError` 映射为 agent 的 `is_error`，非文字内容用占位说明；
@@ -75,7 +75,7 @@
 
 ```json
 "mcp_servers": [{"name": "notes",
-                 "command": ["python", "-m", "miniagent.mcp.notes_server", "--root", "examples/notes"],
+                 "command": ["python", "-m", "minicode.mcp.notes_server", "--root", "examples/notes"],
                  "allow": ["list_notes", "read_note", "search_notes"]}]
 ```
 

@@ -1,4 +1,4 @@
-"""`miniagent-eval view <dir> [<dir> ...]`: serve the trajectory viewer for results or runs directories.
+"""`minicode-eval view <dir> [<dir> ...]`: serve the trajectory viewer for results or runs directories.
 
 Security: binds to 127.0.0.1 only, rejects requests whose Host header is not local (DNS rebinding), serves
 nothing except the viewer page and `trajectory.jsonl` files that live inside the directories given on the

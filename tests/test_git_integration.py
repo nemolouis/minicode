@@ -4,11 +4,11 @@ import subprocess
 
 import pytest
 
-from miniagent.agent import Agent
-from miniagent.client import ModelResponse, ToolCall
-from miniagent.gitwork import AUTHOR, BRANCH_PREFIX, GitError, GitSession
-from miniagent.tools import Workspace
-from miniagent.trajectory import Trajectory
+from minicode.agent import Agent
+from minicode.client import ModelResponse, ToolCall
+from minicode.gitwork import AUTHOR, BRANCH_PREFIX, GitError, GitSession
+from minicode.tools import Workspace
+from minicode.trajectory import Trajectory
 
 
 def git(root, *args):
@@ -55,10 +55,10 @@ def run_agent(repo, script, tmp_path, **kw):
 def test_branch_is_cut_and_original_branch_is_untouched(repo, tmp_path):
     base = git(repo, "rev-parse", "main")
     a, gs, info, r = run_agent(repo, [([call("1", "write_file", path="new.txt", content="x")], 10), (["done"], 10)], tmp_path)
-    assert r.status == "done" and info == {"branch": "miniagent/run1", "base_branch": "main", "base_sha": base, "reused": False}
-    assert git(repo, "rev-parse", "--abbrev-ref", "HEAD") == "miniagent/run1"
+    assert r.status == "done" and info == {"branch": "minicode/run1", "base_branch": "main", "base_sha": base, "reused": False}
+    assert git(repo, "rev-parse", "--abbrev-ref", "HEAD") == "minicode/run1"
     assert git(repo, "rev-parse", "main") == base                                           # main did not move
-    assert git(repo, "log", "--format=%s", f"{base}..HEAD") == "miniagent: step 1: write_file"
+    assert git(repo, "log", "--format=%s", f"{base}..HEAD") == "minicode: step 1: write_file"
     assert git(repo, "show", "--name-only", "--format=", "HEAD") == "new.txt"
 
 
@@ -69,16 +69,16 @@ def test_one_commit_per_changing_turn_and_none_for_read_only_turns(repo, tmp_pat
               ([call("4", "write_file", path="c.txt", content="c"), call("5", "bash", command="rm b.txt")], 10), (["done"], 10)]
     a, gs, _, _ = run_agent(repo, script, tmp_path)
     msgs = git(repo, "log", "--format=%s", f"{gs.base_sha}..HEAD").splitlines()
-    assert msgs == ["miniagent: step 4: bash, write_file", "miniagent: step 2: edit_file"]
+    assert msgs == ["minicode: step 4: bash, write_file", "minicode: step 2: edit_file"]
     assert git(repo, "show", "--name-status", "--format=", "HEAD").splitlines() == ["D\tb.txt", "A\tc.txt"]    # the deletion is committed too
     assert len(gs.commits) == 2
     ev = [json.loads(l) for l in (tmp_path / "traj" / "trajectory.jsonl").read_text().splitlines() if '"git_commit"' in l]
     assert [e["step"] for e in ev] == [2, 4] and ev[1]["sha"] == gs.commits[1] and set(ev[1]["files"]) == {"b.txt", "c.txt"}
 
 
-def test_commits_are_authored_by_miniagent_not_by_the_user(repo, tmp_path):
+def test_commits_are_authored_by_minicode_not_by_the_user(repo, tmp_path):
     run_agent(repo, [([call("1", "write_file", path="n.txt", content="x")], 10), (["done"], 10)], tmp_path)
-    assert git(repo, "log", "-1", "--format=%an <%ae> / %cn <%ce>") == "miniagent <miniagent@localhost> / miniagent <miniagent@localhost>"
+    assert git(repo, "log", "-1", "--format=%an <%ae> / %cn <%ce>") == "minicode <minicode@localhost> / minicode <minicode@localhost>"
     assert "-c" in AUTHOR
 
 
@@ -129,24 +129,24 @@ def test_not_a_repository_and_no_commit_yet(tmp_path):
 
 
 def test_branch_name_collision_gets_a_suffix(repo):
-    git(repo, "branch", "miniagent/r")
+    git(repo, "branch", "minicode/r")
     gs = GitSession(repo, "r")
-    assert gs.start()["branch"] == "miniagent/r-2"
+    assert gs.start()["branch"] == "minicode/r-2"
 
 
 def test_an_agent_branch_is_continued_not_forked(repo, tmp_path):
     a, gs, _, _ = run_agent(repo, [([call("1", "write_file", path="n.txt", content="x")], 10), (["done"], 10)], tmp_path)
     again = GitSession(repo, "resumed")
     info = again.start()
-    assert info["reused"] and info["branch"] == "miniagent/run1" and git(repo, "branch", "--list", "miniagent/resumed") == ""
+    assert info["reused"] and info["branch"] == "minicode/run1" and git(repo, "branch", "--list", "minicode/resumed") == ""
 
 
 def test_summary_text(repo, tmp_path):
     _, gs, _, _ = run_agent(repo, [([call("1", "write_file", path="n.txt", content="x")], 10), (["done"], 10)], tmp_path)
     s = gs.summary()
-    assert "1 commit(s) on miniagent/run1" in s and "1 file changed" in s and "git checkout main" in s
+    assert "1 commit(s) on minicode/run1" in s and "1 file changed" in s and "git checkout main" in s
     quiet = GitSession(repo, "q")
-    quiet.branch = "miniagent/q"
+    quiet.branch = "minicode/q"
     assert "no commits" in quiet.summary()
 
 
@@ -169,16 +169,16 @@ def test_hooks_do_not_run_for_agent_commits(repo, tmp_path):
     hook.write_text("#!/bin/sh\necho ran > " + str(tmp_path / "hook-ran") + "\nexit 1\n")
     hook.chmod(0o755)
     run_agent(repo, [([call("1", "write_file", path="n.txt", content="x")], 10), (["done"], 10)], tmp_path)
-    assert not (tmp_path / "hook-ran").exists() and git(repo, "log", "-1", "--format=%s").startswith("miniagent:")
+    assert not (tmp_path / "hook-ran").exists() and git(repo, "log", "-1", "--format=%s").startswith("minicode:")
 
 
 def test_cli_git_flag(repo, tmp_path, monkeypatch, capsys):
-    from miniagent import cli
+    from minicode import cli
     monkeypatch.setattr(cli, "ChatClient", lambda: Script([([call("1", "write_file", path="cli.txt", content="x")], 10), (["done"], 10)]))
     runs = tmp_path / "runs"
     assert cli.main(["go", "-w", str(repo), "-m", "fake", "-y", "--git", "--runs-dir", str(runs)]) == 0
     out = capsys.readouterr()
-    assert "git: 1 commit(s) on miniagent/" in out.out and git(repo, "rev-parse", "--abbrev-ref", "HEAD").startswith(BRANCH_PREFIX)
+    assert "git: 1 commit(s) on minicode/" in out.out and git(repo, "rev-parse", "--abbrev-ref", "HEAD").startswith(BRANCH_PREFIX)
     (repo / "dirty.txt").write_text("x")
     git(repo, "add", "dirty.txt")
     monkeypatch.setattr(cli, "ChatClient", lambda: Script([(["x"], 10)]))
@@ -187,7 +187,7 @@ def test_cli_git_flag(repo, tmp_path, monkeypatch, capsys):
 
 
 def test_cli_git_flag_with_the_run_directory_inside_the_repo(repo, tmp_path, monkeypatch, capsys):
-    from miniagent import cli
+    from minicode import cli
     monkeypatch.setattr(cli, "ChatClient", lambda: Script([([call("1", "write_file", path="x.txt", content="x")], 10), (["done"], 10)]))
     assert cli.main(["go", "-w", str(repo), "-m", "fake", "-y", "--git", "--runs-dir", str(repo / "runs")]) == 0
     files = git(repo, "log", "--name-only", "--format=").split()

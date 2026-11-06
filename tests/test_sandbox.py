@@ -1,5 +1,5 @@
 """Sandbox tests. The first group needs no Docker; the escape tests are skipped when Docker or the image is missing
-(build the image with: miniagent-eval sandbox-build)."""
+(build the image with: minicode-eval sandbox-build)."""
 import json
 import os
 import shutil
@@ -9,14 +9,14 @@ from pathlib import Path
 
 import pytest
 
-from miniagent.agent import Agent
-from miniagent.client import ModelResponse, ToolCall
-from miniagent.eval.grade import run_tests
-from miniagent.sandbox import (OUTPUT_CAP, Sandbox, SandboxConfig, SandboxError, available, cleanup_orphans,
+from minicode.agent import Agent
+from minicode.client import ModelResponse, ToolCall
+from minicode.eval.grade import run_tests
+from minicode.sandbox import (OUTPUT_CAP, Sandbox, SandboxConfig, SandboxError, available, cleanup_orphans,
                                docker_run_args)
-from miniagent.tools import ToolError, Workspace
+from minicode.tools import ToolError, Workspace
 
-needs_docker = pytest.mark.skipif(not available(), reason="Docker or the miniagent-sandbox image is not available")
+needs_docker = pytest.mark.skipif(not available(), reason="Docker or the minicode-sandbox image is not available")
 
 
 # ------------------------------------------------------------------ the command line (no Docker needed)
@@ -37,7 +37,7 @@ def test_every_security_option_is_on_the_command_line():
     assert pair(a, "--pids-limit", "256") and pair(a, "--memory", "1g") and pair(a, "--memory-swap", "1g")
     assert pair(a, "--cpus", "1.0")
     assert any(x.startswith("--tmpfs=/tmp:") and "size=256m" in x for x in a)
-    assert "--init" in a and pair(a, "--label", "miniagent-sandbox=1")
+    assert "--init" in a and pair(a, "--label", "minicode-sandbox=1")
 
 
 def test_nothing_else_of_the_host_is_handed_to_the_container():
@@ -243,7 +243,7 @@ def test_a_dead_sandbox_ends_the_run_as_an_error_not_as_a_tool_result(tmp_path):
 
 
 # ------------------------------------------------------------------ host/VM file-sharing lag (measured on OrbStack)
-from miniagent.sandbox import workspace_manifest  # noqa: E402
+from minicode.sandbox import workspace_manifest  # noqa: E402
 
 
 @needs_docker
@@ -264,7 +264,7 @@ def test_the_host_manifest_is_what_the_container_computes(tmp_path):
 
 @needs_docker
 def test_a_command_is_not_run_on_a_view_that_differs_from_the_host(tmp_path, monkeypatch):
-    import miniagent.sandbox as sbmod
+    import minicode.sandbox as sbmod
     (tmp_path / "f.txt").write_text("one")
     with Sandbox(tmp_path) as sb:
         monkeypatch.setattr(sbmod, "SYNC_SECONDS", 0.3)
@@ -290,7 +290,7 @@ def test_grading_a_replaced_file_never_sees_the_old_version(tmp_path):
     replacing a smaller one). Grading in a fresh copy fixed that (0 of 300). Same flow as there: copy a task repo, run its
     tests, put the reference file in place, run again."""
     import threading
-    from miniagent.taskgen.mutate import apply, candidates
+    from minicode.taskgen.mutate import apply, candidates
     seed = Path("seeds/inflection/repo")
     if not seed.exists():
         pytest.skip("seed not available")

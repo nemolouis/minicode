@@ -3,10 +3,10 @@ import json
 
 import pytest
 
-from miniagent.agent import Agent
-from miniagent.client import ModelResponse, ToolCall
-from miniagent.tools import MAX_OUTPUT_CHARS, ToolError, Workspace, output_limit_for, truncate
-from miniagent.trajectory import Trajectory
+from minicode.agent import Agent
+from minicode.client import ModelResponse, ToolCall
+from minicode.tools import MAX_OUTPUT_CHARS, ToolError, Workspace, output_limit_for, truncate
+from minicode.trajectory import Trajectory
 
 
 def call(cid, name, **inp): return ToolCall(cid, name, json.dumps(inp))
@@ -124,6 +124,6 @@ def test_agent_lowers_the_limit_as_the_input_grows_and_not_when_off(tmp_path):
 
 
 def test_config_and_cli_know_output_budget(tmp_path):
-    from miniagent.eval.config import validate_config
+    from minicode.eval.config import validate_config
     assert validate_config({"name": "t", "model": "m", "output_budget": True}, check_files=False) == []
     assert validate_config({"name": "t", "model": "m", "output_budget": "yes"}, check_files=False)

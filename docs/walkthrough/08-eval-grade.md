@@ -1,4 +1,4 @@
-# 08 · `miniagent/eval/grade.py`:判分、防作弊、失败归因
+# 08 · `minicode/eval/grade.py`:判分、防作弊、失败归因
 
 ## 要防的"作弊"
 

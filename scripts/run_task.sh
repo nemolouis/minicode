@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
-# Run miniagent on one task from tasks/ in a throwaway copy, then grade it
+# Run minicode on one task from tasks/ in a throwaway copy, then grade it
 # with the task's own test command.
 #   scripts/run_task.sh 03            # prefix match, asks before each write/bash
 #   scripts/run_task.sh 03 -y         # auto-approve (deny-list still applies)
 #   scripts/run_task.sh all -y        # every task in tasks/
-# Extra args after the task are passed to miniagent (e.g. -m deepseek-reasoner).
+# Extra args after the task are passed to minicode (e.g. -m deepseek-reasoner).
 set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-MODEL="${MINIAGENT_MODEL:-deepseek-chat}"
+MODEL="${MINICODE_MODEL:-deepseek-chat}"
 
 [ $# -ge 1 ] || { sed -n '2,8p' "$0"; exit 2; }
 sel="$1"; shift
-[ -x "$ROOT/.venv/bin/miniagent" ] || { echo "missing .venv; run: python3 -m venv .venv && .venv/bin/pip install -e '.[dev]'"; exit 2; }
+[ -x "$ROOT/.venv/bin/minicode" ] || { echo "missing .venv; run: python3 -m venv .venv && .venv/bin/pip install -e '.[dev]'"; exit 2; }
 [ -n "${LLM_API_KEY:-${DEEPSEEK_API_KEY:-}}" ] || { echo "set LLM_API_KEY (or DEEPSEEK_API_KEY) in this shell"; exit 2; }
 export PATH="$ROOT/.venv/bin:$PATH"   # so the agent's bash finds pytest
 
@@ -24,7 +24,7 @@ run_one() {
   cp -R "$dir/repo" "$work"
   echo "=============== $name ==============="
   echo "workspace: $work"
-  miniagent "$prompt" -w "$work" -m "$MODEL" --runs-dir "$ROOT/runs" "$@"
+  minicode "$prompt" -w "$work" -m "$MODEL" --runs-dir "$ROOT/runs" "$@"
   echo "--- grading: $test_cmd"
   if (cd "$work" && bash -c "$test_cmd"); then echo "RESULT $name: PASS"; return 0
   else echo "RESULT $name: FAIL"; return 1; fi

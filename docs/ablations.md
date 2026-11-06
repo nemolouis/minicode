@@ -45,7 +45,7 @@ that turned out wrong.
   stays above the threshold is the verbatim window of the last 4 messages (whole tool outputs), which compaction
   does not touch. It never gets a stable working context and burns its step budget re-summarising.
   This experiment therefore measured a thrashing loop, not the quality of the summaries.
-  To see it: `miniagent-eval view results/20261013-194844-flash results/20261013-205516-ctx3k`, open b08 r0 as A from
+  To see it: `minicode-eval view results/20261013-194844-flash results/20261013-205516-ctx3k`, open b08 r0 as A from
   the first directory and as B from the second; B shows 33 summary compactions in 50 steps.
 - Follow-up: the trigger now waits for regrowth when a compaction cannot get below the threshold
   (`compact_regrowth`, see failure case 2; in simulation 22 -> 3 summaries in 25 steps). The re-run

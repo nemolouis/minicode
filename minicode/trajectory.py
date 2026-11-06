@@ -16,10 +16,10 @@ Events (all carry `ts` and `event`):
   compaction_floor  step, input_tokens, threshold, next_trigger
   subagent     name, index, question, status, steps, input_tokens, output_tokens, final_text  (its own trajectory is in explore-N/)
   checkpoint   step, files, skipped_large, complete  (a workspace copy taken before the step's tools ran)
-  rewind       to_step, restored, removed  (appended by `miniagent --rewind`; the steps from to_step on, above this line, are an
+  rewind       to_step, restored, removed  (appended by `minicode --rewind`; the steps from to_step on, above this line, are an
                abandoned branch: later steps are numbered again from to_step, so a reader must not merge the two)
   git_commit   step, sha, files  (--git: the commit made after the step's tool turn; `error` instead if git failed, then sha is "")
-  stuck        step, tool_call_id, kind ("repeat"|"errors"), count, action ("warn"|"stop")  (see miniagent.stuck)
+  stuck        step, tool_call_id, kind ("repeat"|"errors"), count, action ("warn"|"stop")  (see minicode.stuck)
   budget       step, reason, spent_tokens, spent_usd?  (the run stops before the next request: status "budget")
   run_end      status, steps, input_tokens, output_tokens (sub-agent tokens included), final_text, cost_usd? (when a price is known)
 

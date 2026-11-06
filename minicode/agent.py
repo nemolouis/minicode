@@ -61,7 +61,7 @@ class RunResult:
 
 @dataclass
 class Agent:
-    client: object  # miniagent.client.ChatClient or anything with a compatible .chat()
+    client: object  # minicode.client.ChatClient or anything with a compatible .chat()
     model: str
     workspace: Workspace
     confirm: Callable[[str, dict], bool] = lambda name, args: True
@@ -79,31 +79,31 @@ class Agent:
     temperature: float | None = None  # None -> API default; evals should set it
     disabled_tools: tuple[str, ...] = ()
     meta: dict = field(default_factory=dict)  # task_id, config name, ... -> run_start
-    extra_tools: dict = field(default_factory=dict)  # e.g. MCP tools: name -> Tool (see miniagent.mcp.client)
+    extra_tools: dict = field(default_factory=dict)  # e.g. MCP tools: name -> Tool (see minicode.mcp.client)
     log_reasoning: bool = False  # also write the model's visible thinking into model_call events (large; for SFT data)
     # Run the read-only tool calls of one model turn concurrently (results and log lines keep the model's order).
     parallel_tools: bool = True
     # Check tool arguments against the tool's JSON schema before running it; a bad call gets a precise error instead of a KeyError.
     validate_args: bool = True
-    # Opt-in features, see miniagent.features: "memory" (AGENTS.md in the system prompt), "todo" (todo_write tool),
+    # Opt-in features, see minicode.features: "memory" (AGENTS.md in the system prompt), "todo" (todo_write tool),
     # "explore" (read-only sub-agent tool), "glob" (file listing tool).
     features: tuple[str, ...] = ()
     explore_max_steps: int = 12
-    # Allow/ask/deny rules over tool calls, see miniagent.permissions. None = each tool's own default.
+    # Allow/ask/deny rules over tool calls, see minicode.permissions. None = each tool's own default.
     permissions: Permissions | None = None
-    # Write session.json and workspace checkpoints next to the trajectory so the run can be resumed / rewound (miniagent.session).
+    # Write session.json and workspace checkpoints next to the trajectory so the run can be resumed / rewound (minicode.session).
     session: bool = False
-    # Stuck detection (miniagent.stuck): after this many identical calls with identical results in a row (or consecutive errors
+    # Stuck detection (minicode.stuck): after this many identical calls with identical results in a row (or consecutive errors
     # of one kind) a notice is appended to the tool result; after stuck_stop_after the run ends with status "stuck". 0 = off.
     stuck_warn_after: int = 0
     stuck_stop_after: int = 6
-    # Hard spending limits (miniagent.budget): the run ends with status "budget" before the request that would exceed them.
+    # Hard spending limits (minicode.budget): the run ends with status "budget" before the request that would exceed them.
     budget: Budget | None = None
     # Scale the size of one tool output to the room left before compaction (tools.output_limit_for). Off: always 20000 characters.
     output_budget: bool = False
     # Called with each piece of reply text as it streams in (OpenAI-compatible clients only); None = no streaming.
     on_text: Callable[[str], None] | None = None
-    # A started miniagent.gitwork.GitSession: one commit per tool turn that changed files, on the agent's own branch.
+    # A started minicode.gitwork.GitSession: one commit per tool turn that changed files, on the agent's own branch.
     git: object | None = None
     # Leave background jobs running when run() returns (the interactive client keeps one agent across turns and stops them on exit).
     keep_background: bool = False
@@ -159,7 +159,7 @@ class Agent:
 
     # ------------------------------------------------------------ main loop
     def run(self, task: str, resume: dict | None = None) -> RunResult:
-        """Run `task`. With `resume` (a state from miniagent.session.load_session) the earlier conversation is continued:
+        """Run `task`. With `resume` (a state from minicode.session.load_session) the earlier conversation is continued:
         `task` is added as a new user message and step numbers go on from where the session stopped."""
         base = resume["step"] if resume else 0
         self.cancel_event.clear()

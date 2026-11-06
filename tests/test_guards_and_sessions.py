@@ -4,12 +4,12 @@ import json
 
 import pytest
 
-from miniagent import session as sess
-from miniagent.agent import Agent
-from miniagent.client import ModelResponse, ToolCall
-from miniagent.permissions import Permissions, RuleError, parse_rule
-from miniagent.tools import ToolError, Workspace
-from miniagent.trajectory import Trajectory
+from minicode import session as sess
+from minicode.agent import Agent
+from minicode.client import ModelResponse, ToolCall
+from minicode.permissions import Permissions, RuleError, parse_rule
+from minicode.tools import ToolError, Workspace
+from minicode.trajectory import Trajectory
 
 
 def call(cid, name, **inp): return ToolCall(cid, name, json.dumps(inp))
@@ -314,7 +314,7 @@ def test_snapshot_limits_skip_large_files_and_refuse_incomplete_restores(tmp_pat
 
 
 def test_cli_resume_and_rewind(tmp_path, monkeypatch):
-    from miniagent import cli
+    from minicode import cli
     w = project(tmp_path)
     runs = tmp_path / "runs"
     monkeypatch.setattr(cli, "ChatClient", lambda: Script([([call("1", "write_file", path="a.txt", content="X")], 10), (["done"], 10)]))

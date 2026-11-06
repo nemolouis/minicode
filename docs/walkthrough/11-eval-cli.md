@@ -1,4 +1,4 @@
-# 11 · `miniagent/eval/cli.py` 与 `eval/__main__.py`:评测命令行
+# 11 · `minicode/eval/cli.py` 与 `eval/__main__.py`:评测命令行
 
 ## `eval/__main__.py`(4 行)
 
@@ -7,11 +7,11 @@ import sys
 from .cli import main
 sys.exit(main())
 ```
-让你可以用 `python -m miniagent.eval ...` 运行评测:Python 对一个包使用 `-m` 时,会执行包里的 `__main__.py`。
+让你可以用 `python -m minicode.eval ...` 运行评测:Python 对一个包使用 `-m` 时,会执行包里的 `__main__.py`。
 
 ## `eval/cli.py`
 
-`pyproject.toml` 里 `miniagent-eval = "miniagent.eval.cli:main"` 把它注册成命令 `miniagent-eval`。它有 5 个子命令:`split`、`verify`、`run`、`report`、`compare`。
+`pyproject.toml` 里 `minicode-eval = "minicode.eval.cli:main"` 把它注册成命令 `minicode-eval`。它有 5 个子命令:`split`、`verify`、`run`、`report`、`compare`。
 
 ### 第 18–20 行 `_load_price`
 读价格 JSON,取出当前模型的那一项;文件不存在返回 `None`。
@@ -70,9 +70,9 @@ sys.exit(main())
 ## 完整使用示例
 
 ```bash
-miniagent-eval split                                              # 冻结划分
-miniagent-eval verify                                             # 检查每题可解
-miniagent-eval run --split dev --config configs/baseline.json --repeat 3 --workers 4
-miniagent-eval report results/<run-id>
-miniagent-eval compare results/<run-a> results/<run-b>
+minicode-eval split                                              # 冻结划分
+minicode-eval verify                                             # 检查每题可解
+minicode-eval run --split dev --config configs/baseline.json --repeat 3 --workers 4
+minicode-eval report results/<run-id>
+minicode-eval compare results/<run-a> results/<run-b>
 ```

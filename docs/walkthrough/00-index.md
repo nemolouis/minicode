@@ -8,20 +8,20 @@
 
 | 顺序 | 文件 | 一句话 | 讲解 |
 |---|---|---|---|
-| 1 | `miniagent/safety.py` | 危险命令黑名单(25 行) | [01-safety.md](01-safety.md) |
-| 2 | `miniagent/trajectory.py` | 把运行过程一行行写进日志文件 | [02-trajectory.md](02-trajectory.md) |
-| 3 | `miniagent/tools.py` | agent 的"手":读/写/改文件、跑命令、搜索 | [03-tools.md](03-tools.md) |
-| 4 | `miniagent/client.py` | 通过 HTTP 跟 DeepSeek 对话 | [04-client.md](04-client.md) |
-| 5 | `miniagent/agent.py` | **核心**:agent 主循环 + 上下文压缩 | [05-agent.md](05-agent.md) |
-| 6 | `miniagent/cli.py` | 命令行入口 | [06-cli.md](06-cli.md) |
-| 7 | `miniagent/eval/tasks.py` | 任务加载、dev/test 划分、哈希防篡改 | [07-eval-tasks.md](07-eval-tasks.md) |
-| 8 | `miniagent/eval/grade.py` | 判分、防作弊、失败归因 | [08-eval-grade.md](08-eval-grade.md) |
-| 9 | `miniagent/eval/runner.py` | 跑一次"任务×配置×重复" | [09-eval-runner.md](09-eval-runner.md) |
-| 10 | `miniagent/eval/report.py` | 统计、置信区间、报告、对比 | [10-eval-report.md](10-eval-report.md) |
-| 11 | `miniagent/eval/cli.py`、`eval/__main__.py` | 评测命令行 | [11-eval-cli.md](11-eval-cli.md) |
+| 1 | `minicode/safety.py` | 危险命令黑名单(25 行) | [01-safety.md](01-safety.md) |
+| 2 | `minicode/trajectory.py` | 把运行过程一行行写进日志文件 | [02-trajectory.md](02-trajectory.md) |
+| 3 | `minicode/tools.py` | agent 的"手":读/写/改文件、跑命令、搜索 | [03-tools.md](03-tools.md) |
+| 4 | `minicode/client.py` | 通过 HTTP 跟 DeepSeek 对话 | [04-client.md](04-client.md) |
+| 5 | `minicode/agent.py` | **核心**:agent 主循环 + 上下文压缩 | [05-agent.md](05-agent.md) |
+| 6 | `minicode/cli.py` | 命令行入口 | [06-cli.md](06-cli.md) |
+| 7 | `minicode/eval/tasks.py` | 任务加载、dev/test 划分、哈希防篡改 | [07-eval-tasks.md](07-eval-tasks.md) |
+| 8 | `minicode/eval/grade.py` | 判分、防作弊、失败归因 | [08-eval-grade.md](08-eval-grade.md) |
+| 9 | `minicode/eval/runner.py` | 跑一次"任务×配置×重复" | [09-eval-runner.md](09-eval-runner.md) |
+| 10 | `minicode/eval/report.py` | 统计、置信区间、报告、对比 | [10-eval-report.md](10-eval-report.md) |
+| 11 | `minicode/eval/cli.py`、`eval/__main__.py` | 评测命令行 | [11-eval-cli.md](11-eval-cli.md) |
 | 12 | `tests/*.py` | 测试 | [12-tests.md](12-tests.md) |
 
-`__init__.py`(两个,都是空文件):告诉 Python"这个文件夹是一个包(package)",才能写 `from miniagent.agent import Agent`。
+`__init__.py`(两个,都是空文件):告诉 Python"这个文件夹是一个包(package)",才能写 `from minicode.agent import Agent`。
 
 ## 文件之间的依赖关系
 

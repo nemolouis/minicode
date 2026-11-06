@@ -1,6 +1,6 @@
 import pytest
 
-from miniagent.tools import ToolError, Workspace
+from minicode.tools import ToolError, Workspace
 
 SRC = "def f(x):\n    if x > 1:\n        return x\n    return 0\n\ndef g(x):\n    if x > 1:\n        return -x\n"
 

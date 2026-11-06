@@ -11,7 +11,7 @@ import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from miniagent.mcp.client import McpClient, McpRpcError  # noqa: E402
+from minicode.mcp.client import McpClient, McpRpcError  # noqa: E402
 
 NOTES = Path(__file__).resolve().parent.parent / "examples" / "notes"
 
@@ -30,7 +30,7 @@ def call(c, name, **args):
 
 
 def server(root, *extra):
-    c = McpClient([sys.executable, "-m", "miniagent.mcp.notes_server", "--root", str(root), *extra])
+    c = McpClient([sys.executable, "-m", "minicode.mcp.notes_server", "--root", str(root), *extra])
     c.start()
     c.initialize()
     return c

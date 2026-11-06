@@ -1,15 +1,15 @@
 """The interactive terminal client: a multi-turn conversation with the agent in one process.
 
-    $ miniagent -w my/repo -m deepseek-chat --stream --git
-    miniagent> fix the failing test in stats.py
+    $ minicode -w my/repo -m deepseek-chat --stream --git
+    minicode> fix the failing test in stats.py
     ... streamed answer, one line per tool call, a diff preview before every edit that needs your OK ...
-    miniagent> /diff        everything changed since this session started
-    miniagent> /undo        take the last turn back (files and conversation)
-    miniagent> /cost
+    minicode> /diff        everything changed since this session started
+    minicode> /undo        take the last turn back (files and conversation)
+    minicode> /cost
 
 It drives the same `Agent` as the one-shot command and uses the session machinery for everything stateful: each turn continues the saved
 conversation (`Agent.run(text, resume=...)`), `/rewind` and `/undo` are `session.rewind`, Ctrl-C during a turn is the agent's graceful
-interruption, and the whole conversation is one trajectory that `miniagent-eval view` can replay. The terminal is injected (`Terminal`), so
+interruption, and the whole conversation is one trajectory that `minicode-eval view` can replay. The terminal is injected (`Terminal`), so
 the loop is tested with scripted input.
 """
 from __future__ import annotations
@@ -24,7 +24,7 @@ from typing import Callable
 
 from .controller import ControllerError, SessionController, workspace_diff  # noqa: F401  (workspace_diff re-exported)
 
-PROMPT = "miniagent> "
+PROMPT = "minicode> "
 HELP = """commands (everything else is sent to the agent):
   /help                 this text
   /status               model, workspace, mode, tokens so far
@@ -144,7 +144,7 @@ class Repl:
     def run(self) -> int:
         t = self.term
         self._open()
-        t.line(t.style("miniagent", "1") + f"  {self.agent.model}  {self.workspace}" + ("  (resumed)" if self.state else ""))
+        t.line(t.style("minicode", "1") + f"  {self.agent.model}  {self.workspace}" + ("  (resumed)" if self.state else ""))
         t.line(t.style("type a task, or /help. Ctrl-C stops a turn, /exit or Ctrl-D leaves.", "2"))
         try:
             while True:
@@ -172,7 +172,7 @@ class Repl:
         t = self.term
         if self.turns:
             t.line(t.style(f"session: {self.run_dir}", "2"))
-            t.line(t.style(f"continue later with: miniagent -w {self.workspace} --resume {self.run_dir}", "2"))
+            t.line(t.style(f"continue later with: minicode -w {self.workspace} --resume {self.run_dir}", "2"))
             if self.git is not None:
                 t.line(self.git.summary())
 

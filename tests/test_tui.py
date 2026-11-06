@@ -10,11 +10,11 @@ pytest.importorskip("textual")
 from rich.text import Text  # noqa: E402
 from textual.widgets import OptionList  # noqa: E402
 
-from miniagent.agent import Agent  # noqa: E402
-from miniagent.client import ModelResponse, ToolCall  # noqa: E402
-from miniagent.controller import SessionController  # noqa: E402
-from miniagent.tools import Workspace  # noqa: E402
-from miniagent.tui.app import (COMMANDS, ApprovalPanel, AssistantMessage, MiniAgentApp, Note, PromptInput, StepsScreen, TextScreen,  # noqa: E402
+from minicode.agent import Agent  # noqa: E402
+from minicode.client import ModelResponse, ToolCall  # noqa: E402
+from minicode.controller import SessionController  # noqa: E402
+from minicode.tools import Workspace  # noqa: E402
+from minicode.tui.app import (COMMANDS, ApprovalPanel, AssistantMessage, MiniCodeApp, Note, PromptInput, StepsScreen, TextScreen,  # noqa: E402
                                ToolCard, UserMessage)
 
 
@@ -79,7 +79,7 @@ class Snap:
 def run(coro_fn, env, script, *, size=(120, 40), auto=False, **kw):
     """Run `coro_fn(app, pilot)` inside the headless app and return (snapshot, controller, client)."""
     ctl, client = make_ctl(env, script, **kw)
-    app = MiniAgentApp(ctl, auto_approve=auto)
+    app = MiniCodeApp(ctl, auto_approve=auto)
     box = {}
 
     async def main():
@@ -120,7 +120,7 @@ def test_startup_shows_the_banner_status_and_an_empty_focused_input(env):
         seen["tips"] = [str(w.content) for w in app.query(".tips")]
 
     run(go, env, [])
-    assert "miniagent" in seen["status"] and "fake-model" in seen["status"] and str(env[1]) in seen["status"]
+    assert "minicode" in seen["status"] and "fake-model" in seen["status"] and str(env[1]) in seen["status"]
     assert "enter send" in seen["hints"] and "esc interrupt" in seen["hints"] and seen["focused"] and "/help" in seen["tips"][0]
 
 
@@ -525,7 +525,7 @@ def test_clear_starts_a_new_conversation_in_a_new_session_dir(env):
 def test_exit_command_and_ctrl_d_and_double_ctrl_c_quit(env):
     for how in ("/exit", "ctrl+d", "ctrl+c ctrl+c", "ctrl+q"):
         ctl, _ = make_ctl(env, [])
-        app = MiniAgentApp(ctl)
+        app = MiniCodeApp(ctl)
         result = {}
 
         async def main(app=app, how=how, result=result):
@@ -586,7 +586,7 @@ def test_resumed_session_shows_the_earlier_conversation(env):
     tmp, w = env
     script = [([call("1", "read_file", path="a.txt")], 10), (["It says one and two."], 10)]
     ctl1, _ = make_ctl(env, script)
-    app1 = MiniAgentApp(ctl1, auto_approve=True)
+    app1 = MiniCodeApp(ctl1, auto_approve=True)
 
     async def first():
         async with app1.run_test(size=(100, 30)) as pilot:
@@ -595,7 +595,7 @@ def test_resumed_session_shows_the_earlier_conversation(env):
             await idle(app1, pilot)
 
     asyncio.run(first())
-    from miniagent.session import load_session
+    from minicode.session import load_session
     state = load_session(ctl1.run_dir)
     seen = {}
 
@@ -625,14 +625,14 @@ def test_screenshot_contains_the_visible_pieces(env):
 
     run(go, env, [(["Everything is fine."], 10)], size=(110, 30))
     svg = seen["svg"]
-    for piece in ("miniagent", "show me", "Everything", "fake-model", "enter send"):
+    for piece in ("minicode", "show me", "Everything", "fake-model", "enter send"):
         assert piece in svg.replace("&#160;", " ").replace("&nbsp;", " ") or piece.replace(" ", "&#160;") in svg
 
 
 # ---------------------------------------------------------------- the command line
 def test_cli_launches_the_tui_with_a_controller(env, monkeypatch, capsys):
-    import miniagent.tui as tui
-    from miniagent import cli
+    import minicode.tui as tui
+    from minicode import cli
     tmp, w = env
     got = {}
 
@@ -651,7 +651,7 @@ def test_cli_launches_the_tui_with_a_controller(env, monkeypatch, capsys):
 def test_cli_auto_picks_the_line_repl_when_not_a_terminal(env, monkeypatch, capsys):
     import io
 
-    from miniagent import cli
+    from minicode import cli
     tmp, w = env
     monkeypatch.setattr(cli, "ChatClient", lambda: Script([(["plain repl answer"], 5)]))
     monkeypatch.setattr("sys.stdin", io.StringIO("hello\n"))
@@ -660,12 +660,12 @@ def test_cli_auto_picks_the_line_repl_when_not_a_terminal(env, monkeypatch, caps
 
 
 def test_cli_tui_without_textual_explains_how_to_install(env, monkeypatch, capsys):
-    import miniagent.tui as tui
-    from miniagent import cli
+    import minicode.tui as tui
+    from minicode import cli
     monkeypatch.setattr(tui, "available", lambda: False)
     monkeypatch.setattr(cli, "ChatClient", lambda: Script([]))
     assert cli.main(["-w", str(env[1]), "-m", "fake", "--ui", "tui", "--runs-dir", str(env[0] / "runs")]) == 2
-    assert "pip install 'miniagent[tui]'" in capsys.readouterr().err
+    assert "pip install 'minicode[tui]'" in capsys.readouterr().err
 
 
 # ---------------------------------------------------------------- Chinese (and other IME) input
@@ -712,12 +712,12 @@ def run_in_pty(extra_env, seconds=3.0):
     w = Path(tempfile.mkdtemp()) / "proj"
     w.mkdir()
     env = {**os.environ, "LLM_BASE_URL": "http://127.0.0.1:9", "LLM_API_KEY": "k", "TERM": "xterm-256color", **extra_env}
-    for k in ("TEXTUAL_DISABLE_KITTY_KEY", "MINIAGENT_TUI_KITTY"):
+    for k in ("TEXTUAL_DISABLE_KITTY_KEY", "MINICODE_TUI_KITTY"):
         if k not in extra_env:
             env.pop(k, None)
     m, s = pty.openpty()
     fcntl.ioctl(s, termios.TIOCSWINSZ, struct.pack("HHHH", 30, 100, 0, 0))
-    p = subprocess.Popen([sys.executable, "-m", "miniagent.cli", "-w", str(w), "-m", "fake", "--runs-dir", str(w.parent / "runs"), "--ui", "tui"],
+    p = subprocess.Popen([sys.executable, "-m", "minicode.cli", "-w", str(w), "-m", "fake", "--runs-dir", str(w.parent / "runs"), "--ui", "tui"],
                          stdin=s, stdout=s, stderr=s, env=env, close_fds=True)
     os.close(s)
     out, end = b"", time.time() + seconds
@@ -736,24 +736,24 @@ def run_in_pty(extra_env, seconds=3.0):
 def test_the_kitty_keyboard_protocol_is_off_so_that_iterm2_delivers_ime_text():
     import re
     out = run_in_pty({})
-    assert b"miniagent" in out                                                 # it started
+    assert b"minicode" in out                                                 # it started
     assert not re.search(rb"\x1b\[>\d+u", out), "the kitty keyboard protocol was enabled: iTerm2 loses text committed by an input method"
 
 
 def test_the_kitty_keyboard_protocol_can_be_turned_back_on():
     import re
-    out = run_in_pty({"MINIAGENT_TUI_KITTY": "1"})
+    out = run_in_pty({"MINICODE_TUI_KITTY": "1"})
     assert re.search(rb"\x1b\[>\d+u", out)
 
 
 def test_importing_the_ui_package_decides_before_textual_reads_the_variable():
     import subprocess
     import sys
-    code = "import miniagent.tui, textual.constants as c; print(c.DISABLE_KITTY_KEY)"
+    code = "import minicode.tui, textual.constants as c; print(c.DISABLE_KITTY_KEY)"
     import os
-    base = {k: v for k, v in os.environ.items() if k not in ("TEXTUAL_DISABLE_KITTY_KEY", "MINIAGENT_TUI_KITTY")}
+    base = {k: v for k, v in os.environ.items() if k not in ("TEXTUAL_DISABLE_KITTY_KEY", "MINICODE_TUI_KITTY")}
     assert subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, env=base).stdout.strip() == "True"
-    assert subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, env={**base, "MINIAGENT_TUI_KITTY": "1"}).stdout.strip() == "False"
+    assert subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, env={**base, "MINICODE_TUI_KITTY": "1"}).stdout.strip() == "False"
 
 
 # ---------------------------------------------------------------- survivors of the mutation run
@@ -776,7 +776,7 @@ def test_text_of_a_non_streaming_step_is_shown_after_a_streaming_step(env):
     client = Mixed([(["Step one text. ", call("1", "read_file", path="a.txt")], 10), (["Step two text."], 10)])
     ctl.make_agent = lambda trajectory=None, on_text=None, confirm=None: Agent(
         client, "fake-model", Workspace(env[1]), trajectory=trajectory, on_text=on_text, confirm=confirm, session=True)
-    app = MiniAgentApp(ctl, auto_approve=True)
+    app = MiniCodeApp(ctl, auto_approve=True)
     box = {}
 
     async def main():

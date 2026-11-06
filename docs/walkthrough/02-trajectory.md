@@ -1,4 +1,4 @@
-# 02 · `miniagent/trajectory.py`:轨迹日志
+# 02 · `minicode/trajectory.py`:轨迹日志
 
 **作用**:把一次运行里发生的每件事,以"一行一个 JSON"的格式追加写入文件(JSONL)。评测和回放都靠它。
 

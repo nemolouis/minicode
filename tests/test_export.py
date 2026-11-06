@@ -1,11 +1,11 @@
 """SFT export tests (no network)."""
 import json
 
-from miniagent.agent import SYSTEM_PROMPT
-from miniagent.client import ModelResponse, ToolCall
-from miniagent.eval.export import _well_formed, build_messages, export_sft
-from miniagent.eval.runner import run_one
-from miniagent.eval.tasks import load_tasks
+from minicode.agent import SYSTEM_PROMPT
+from minicode.client import ModelResponse, ToolCall
+from minicode.eval.export import _well_formed, build_messages, export_sft
+from minicode.eval.runner import run_one
+from minicode.eval.tasks import load_tasks
 
 
 def call(i, name, **inp): return ToolCall(i, name, json.dumps(inp))

@@ -4,15 +4,15 @@ import threading
 
 import pytest
 
-from miniagent.agent import Agent
-from miniagent.client import ModelResponse, ToolCall
-from miniagent.eval.replay import replay_run, signature
-from miniagent.eval.runner import run_one
-from miniagent.eval.tasks import load_tasks
-from miniagent.replay import (CassetteClient, ReplayMiss, TrajectoryReplayClient, request_key, response_from_dict,
+from minicode.agent import Agent
+from minicode.client import ModelResponse, ToolCall
+from minicode.eval.replay import replay_run, signature
+from minicode.eval.runner import run_one
+from minicode.eval.tasks import load_tasks
+from minicode.replay import (CassetteClient, ReplayMiss, TrajectoryReplayClient, request_key, response_from_dict,
                               response_to_dict)
-from miniagent.tools import Workspace
-from miniagent.trajectory import Trajectory
+from minicode.tools import Workspace
+from minicode.trajectory import Trajectory
 
 
 def call(i, name, **inp): return ToolCall(i, name, json.dumps(inp))

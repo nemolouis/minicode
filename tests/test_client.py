@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from miniagent.client import APIError, ChatClient
+from minicode.client import APIError, ChatClient
 
 
 def test_requires_api_key(monkeypatch):
@@ -30,7 +30,7 @@ def test_glm_style_usage_and_extra_body(monkeypatch):
 def test_backoff_on_429_then_success(monkeypatch):
     import io
     import urllib.error
-    from miniagent import client as mod
+    from minicode import client as mod
 
     calls, sleeps = {"n": 0}, []
 
@@ -53,7 +53,7 @@ def test_backoff_on_429_then_success(monkeypatch):
 
 
 def test_tool_call_extra_fields_roundtrip_and_missing_ids(monkeypatch):
-    from miniagent.agent import _assistant_message
+    from minicode.agent import _assistant_message
     c = ChatClient(api_key="k", base_url="http://x")
     sig = {"google": {"thought_signature": "SIG=="}}
 
@@ -74,7 +74,7 @@ def test_tool_call_extra_fields_roundtrip_and_missing_ids(monkeypatch):
 def test_daily_quota_429_raises_without_waiting(monkeypatch):
     import io
     import urllib.error
-    from miniagent import client as mod
+    from minicode import client as mod
 
     body = (b'{"error": {"code": 429, "message": "You exceeded your current quota. '
             b'Quota exceeded for metric: generate_content_free_tier_requests, limit: 500. '
@@ -92,7 +92,7 @@ def test_daily_quota_429_raises_without_waiting(monkeypatch):
 
 
 def test_short_server_delay_hint_is_used(monkeypatch):
-    from miniagent import client as mod
+    from minicode import client as mod
 
     assert mod.suggested_delay("Please retry in 23.5s.") == 23.5
     assert mod.suggested_delay('x "retryDelay": "41s" y') == 41.0
@@ -167,7 +167,7 @@ def _gemini_client(**kw):
 
 
 def test_gemini_base_url_gets_v1beta_and_header(monkeypatch):
-    from miniagent import client as mod
+    from minicode import client as mod
     assert _gemini_client().base_url == "http://relay.example/v1beta"
     assert ChatClient(api_key="k", base_url="http://r/v1beta", api_style="gemini").base_url == "http://r/v1beta"
     seen = {}
@@ -245,7 +245,7 @@ def test_gemini_response_parsing_signature_usage_and_finish(monkeypatch):
     assert json.loads(r.tool_calls[0].arguments) == {"command": "ls"}
     assert r.usage == {"input_tokens": 100, "output_tokens": 50, "cache_hit_tokens": 64,
                        "reasoning_tokens": 40, "reasoning_chars": 0}
-    from miniagent.agent import _assistant_message
+    from minicode.agent import _assistant_message
     assert _assistant_message(r)["tool_calls"][0]["thought_signature"] == "SIG=="      # replayed next turn
 
     data2 = {"candidates": [{"finishReason": "MAX_TOKENS", "content": {"parts": []}}]}
@@ -257,7 +257,7 @@ def test_gemini_response_parsing_signature_usage_and_finish(monkeypatch):
 
 
 # ------------------------------------------------------------------ tool calls written as plain JSON in the reply text
-from miniagent.client import extract_text_tool_calls  # noqa: E402
+from minicode.client import extract_text_tool_calls  # noqa: E402
 
 TOOLS = [{"type": "function", "function": {"name": n, "description": "", "parameters": {"type": "object", "properties": {}}}}
          for n in ("bash", "read_file", "edit_file")]

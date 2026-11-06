@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from miniagent.eval.config import load_config, validate_config
+from minicode.eval.config import load_config, validate_config
 
 OK = {"name": "t", "model": "m"}
 
@@ -80,7 +80,7 @@ def test_unreadable_or_non_object_config(tmp_path):
 
 
 def test_cli_refuses_a_config_with_a_typo(tmp_path, capsys):
-    from miniagent.eval.cli import main
+    from minicode.eval.cli import main
     (tmp_path / "c.json").write_text(json.dumps({"name": "t", "model": "m", "diagnostcs": True}))
     with pytest.raises(SystemExit) as e:
         main(["run", "--config", str(tmp_path / "c.json")])

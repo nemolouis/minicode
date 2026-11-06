@@ -101,7 +101,7 @@ How to read it
 - **Root cause**: `subprocess.run(cmd, shell=True, timeout=...)` kills only the shell. With a pipeline or
   `cd x && pytest`, the grandchild survives. The agent writes such commands all the time, and the code under test
   sometimes contains an infinite loop. Grading ran tests the same way.
-- **Fix**: `miniagent/proc.py` runs each command in its own process group and kills the group on timeout and after
+- **Fix**: `minicode/proc.py` runs each command in its own process group and kills the group on timeout and after
   exit; used by the `bash` tool and by grading. Test `test_timeout_kills_whole_process_group`.
 - **Lesson**: a timeout has to kill the process *tree*.
 - **Note**: some CPU load seen at the same time was legitimate (the b15 hidden tests take 36 s of CPU even with

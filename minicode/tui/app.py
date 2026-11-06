@@ -1,6 +1,6 @@
 """A Claude-Code-style terminal application for the agent, built on Textual.
 
-    ┌ ● miniagent · deepseek-chat · ~/proj · ⎇ miniagent/run1 ───────────────────────────────┐
+    ┌ ● minicode · deepseek-chat · ~/proj · ⎇ minicode/run1 ───────────────────────────────┐
     │  > fix the failing test                                                                 │
     │  I'll look at the test first.                                                           │
     │  ▸ ✓ read_file stats.py                                                                 │
@@ -15,7 +15,7 @@
     └─────────────────────────────────────────────────────────────────────────────────────────┘
 
 The agent runs in a worker thread; everything it reports (streamed text, tool calls, results, approvals) is marshalled to the UI thread.
-All session logic (turns, /diff, /undo, /rewind, cost) lives in `miniagent.controller.SessionController`, shared with the line REPL.
+All session logic (turns, /diff, /undo, /rewind, cost) lives in `minicode.controller.SessionController`, shared with the line REPL.
 """
 from __future__ import annotations
 
@@ -293,9 +293,9 @@ TextScreen, StepsScreen { align: center middle; }
 """
 
 
-class MiniAgentApp(App):
+class MiniCodeApp(App):
     CSS = CSS
-    TITLE = "miniagent"
+    TITLE = "minicode"
     BINDINGS = [Binding("escape", "interrupt", "interrupt", show=False), Binding("ctrl+c", "interrupt_or_quit", "interrupt", show=False, priority=True),
                 Binding("ctrl+d", "quit_if_empty", "quit", show=False, priority=True), Binding("ctrl+q", "quit_app", "quit", show=False),
                 Binding("ctrl+b", "toggle_sidebar", "sidebar", show=False), Binding("ctrl+l", "clear_screen", "redraw", show=False)]
@@ -387,7 +387,7 @@ class MiniAgentApp(App):
     def _refresh_chrome(self) -> None:
         a = self.ctl.agent
         git = self.ctl.git
-        parts = ["● miniagent", a.model, self.workspace_label]
+        parts = ["● minicode", a.model, self.workspace_label]
         parts += [f"⎇ {git.branch}"] if git is not None else []
         parts += ["auto-approve"] if self.auto_approve else []
         self._w("#top", StatusBar).update(Text(" · ".join(parts), style="bold"))
@@ -710,7 +710,7 @@ class MiniAgentApp(App):
         if name in ("/exit", "/quit"):
             self.action_quit_app()
         elif name in ("/help", "/?"):
-            self.push_screen(TextScreen("miniagent: keys and commands", self._help_text()))
+            self.push_screen(TextScreen("minicode: keys and commands", self._help_text()))
         elif name == "/diff":
             lines = self.ctl.diff_lines()
             body = diff_text(lines) if lines else Text("no changes yet", style="dim")

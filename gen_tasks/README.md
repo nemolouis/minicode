@@ -12,9 +12,9 @@ What is committed:
 Regenerate (needs Docker and the sandbox image, takes about an hour):
 
 ```bash
-miniagent-eval sandbox-build
-miniagent-eval gen --seeds seeds --out gen_tasks --per-seed 24 --workers 4
-miniagent-eval --tasks-root gen_tasks verify --sandbox --workers 4     # every task must fail as shipped and pass with its solution
+minicode-eval sandbox-build
+minicode-eval gen --seeds seeds --out gen_tasks --per-seed 24 --workers 4
+minicode-eval --tasks-root gen_tasks verify --sandbox --workers 4     # every task must fail as shipped and pass with its solution
 ```
 
 Generation is seeded (`--rng`), but mutants that time out or flake depend on the machine, so a regeneration can differ in

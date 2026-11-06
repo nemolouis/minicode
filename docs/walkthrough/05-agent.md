@@ -1,4 +1,4 @@
-# 05 · `miniagent/agent.py`:agent 主循环(核心)
+# 05 · `minicode/agent.py`:agent 主循环(核心)
 
 整个项目最重要的文件。先看它想解决的问题,再逐行。
 

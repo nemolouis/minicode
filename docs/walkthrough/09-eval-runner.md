@@ -1,10 +1,10 @@
-# 09 · `miniagent/eval/runner.py`:跑一次评测
+# 09 · `minicode/eval/runner.py`:跑一次评测
 
 **作用**:对一个 `(任务, 配置, 第几次重复)` 完整执行:复制仓库 → 跑 agent → 恢复测试 → 判分 → 汇总成一条记录。
 
 ## 第 1–14 行:导入
 
-`from ..agent import ...` 里的 **`..`** 表示"上一级包":当前文件在 `miniagent/eval/`,`..` 就是 `miniagent/`。`from .grade import ...` 的 `.` 则是同级的 `miniagent/eval/grade.py`。
+`from ..agent import ...` 里的 **`..`** 表示"上一级包":当前文件在 `minicode/eval/`,`..` 就是 `minicode/`。`from .grade import ...` 的 `.` 则是同级的 `minicode/eval/grade.py`。
 
 ## 第 17–18 行:`config_hash`
 

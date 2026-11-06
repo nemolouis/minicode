@@ -6,7 +6,7 @@ import urllib.request
 
 import pytest
 
-from miniagent.eval.view import make_server
+from minicode.eval.view import make_server
 
 
 def get(url, host=None):
@@ -41,7 +41,7 @@ def server(tmp_path):
 
 def test_page_and_sources(server):
     code, body = get(server + "/")
-    assert code == 200 and b"<title>miniagent trajectory viewer</title>" in body
+    assert code == 200 and b"<title>minicode trajectory viewer</title>" in body
     code, body = get(server + "/api/sources")
     srcs = json.loads(body)
     assert [s["kind"] for s in srcs] == ["results", "runs"] and srcs[0]["meta"]["config"] == "c" and srcs[0]["n"] == 1

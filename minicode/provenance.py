@@ -25,7 +25,7 @@ def provenance() -> dict:
     sha = _git("rev-parse", "HEAD")
     out = {"git_sha": sha, "git_dirty": None, "dirty_files": [], "python": sys.version.split()[0], "platform": platform.platform()}
     if sha:
-        status = _git("status", "--porcelain", "--", "miniagent", "configs", "prompts", "tasks", "pyproject.toml")
+        status = _git("status", "--porcelain", "--", "minicode", "configs", "prompts", "tasks", "pyproject.toml")
         if status is not None:
             files = [line[3:] for line in status.splitlines()]
             out["git_dirty"], out["dirty_files"] = bool(files), files[:20]

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>miniagent trajectory viewer</title>
+<title>minicode trajectory viewer</title>
 <style>
 :root {
   --bg: #f6f7f9; --card: #ffffff; --fg: #1b1f24; --muted: #6a737d; --border: #d8dee4;
@@ -70,7 +70,7 @@ td.num { text-align: right; font-variant-numeric: tabular-nums; } th.num { text-
 </head>
 <body>
 <header class="top">
-  <h1>miniagent trajectory viewer</h1>
+  <h1>minicode trajectory viewer</h1>
   <span class="tabs row">
     <button id="tab-browse" data-tab="browse">Runs</button>
     <button id="tab-single" data-tab="single">Run A</button>
@@ -366,7 +366,7 @@ async function openRun(slot, source, rec) {   // double-click: open as A and vie
 const isPicked = (slot, source, rec) => { const s = state[slot]; return !!(s && s.source === source && s.rec && s.rec.id === rec.id); };
 async function renderBrowse(root) {
   if (!state.server) {
-    root.append(h("div", { class: "card" }, h("b", null, "Static mode"), h("p", null, "Open this page through ", h("code", null, "miniagent-eval view <results-dir>"),
+    root.append(h("div", { class: "card" }, h("b", null, "Static mode"), h("p", null, "Open this page through ", h("code", null, "minicode-eval view <results-dir>"),
       " to browse every run of a results directory and compare any two. Without the server you can still load single trajectory files with “Load A…” and “Load B…”.")));
     return;
   }

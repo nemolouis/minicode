@@ -90,7 +90,7 @@ def apply_split(tasks: list[Task], split_path: str | Path) -> list[Task]:
     for t in tasks:
         e = data.get(t.id)
         if e is None:
-            raise SystemExit(f"task {t.id} is not in SPLIT.json; run `miniagent-eval split`")
+            raise SystemExit(f"task {t.id} is not in SPLIT.json; run `minicode-eval split`")
         if e["hash"] != t.hash:
             raise SystemExit(f"task {t.id} changed since the split was frozen "
                              f"({e['hash']} -> {t.hash}); create a new task id instead of editing")

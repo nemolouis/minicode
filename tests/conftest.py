@@ -1,9 +1,9 @@
-"""Every trajectory a test run produces with the current agent must satisfy the documented schema (miniagent.trajectory)."""
+"""Every trajectory a test run produces with the current agent must satisfy the documented schema (minicode.trajectory)."""
 import json
 
 import pytest
 
-from miniagent.trajectory import validate_events
+from minicode.trajectory import validate_events
 
 
 @pytest.fixture(autouse=True)

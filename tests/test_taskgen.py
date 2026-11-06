@@ -6,17 +6,17 @@ from pathlib import Path
 
 import pytest
 
-from miniagent.client import ModelResponse, ToolCall
-from miniagent.eval.grade import is_test_file
-from miniagent.eval.runner import run_one
-from miniagent.eval.tasks import load_tasks
-from miniagent.sandbox import available
-from miniagent.taskgen.generate import (GenConfig, Seed, SuiteRun, _check_built, _judge, generate, load_seed, parse_suite,
+from minicode.client import ModelResponse, ToolCall
+from minicode.eval.grade import is_test_file
+from minicode.eval.runner import run_one
+from minicode.eval.tasks import load_tasks
+from minicode.sandbox import available
+from minicode.taskgen.generate import (GenConfig, Seed, SuiteRun, _check_built, _judge, generate, load_seed, parse_suite,
                                         seed_split)
-from miniagent.taskgen.mutate import Mutant, apply, candidates
-from miniagent.taskgen.testsplit import close_over_calls, find_tests, keep_only, node_key
+from minicode.taskgen.mutate import Mutant, apply, candidates
+from minicode.taskgen.testsplit import close_over_calls, find_tests, keep_only, node_key
 
-needs_docker = pytest.mark.skipif(not available(), reason="Docker or the miniagent-sandbox image is not available")
+needs_docker = pytest.mark.skipif(not available(), reason="Docker or the minicode-sandbox image is not available")
 
 
 def mutated(source, family, nth=0):

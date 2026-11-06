@@ -1,4 +1,4 @@
-from miniagent.trainguard import TrainingDiverged, make_guard
+from minicode.trainguard import TrainingDiverged, make_guard
 
 # the reports of the run that diverged (lr 1e-4, no clipping): (step, training loss) every 8 steps, validation (step, loss)
 TRAIN = [(8, 1.608), (16, 1.611), (24, 1.19), (32, 1.17), (40, 2.35), (48, 1.17), (56, 3.03), (64, 4.52), (72, 4.84), (80, 2.86),

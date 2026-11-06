@@ -1,4 +1,4 @@
-# 07 · `miniagent/eval/tasks.py`:任务与 dev/test 划分
+# 07 · `minicode/eval/tasks.py`:任务与 dev/test 划分
 
 ## 背景:评测要解决什么
 

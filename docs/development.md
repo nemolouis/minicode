@@ -14,15 +14,15 @@ make check          # ruff + pytest + 黄金轨迹的格式检查（CI 跑的就
 
 | 防线 | 位置 | 防什么 |
 |---|---|---|
-| 评测配置严格校验 | `miniagent/eval/config.py`，`tests/test_config.py` | 配置里的拼写错误（如 `require_reed`）曾经会被静默忽略，实验照跑但什么也没测；现在未知键、错类型、越界值、不存在的功能名/工具名/文件都直接报错，所有 `configs/*.json` 有测试保证合法 |
-| 运行溯源 | `miniagent/provenance.py` | `meta.json` 和每条 `run_start` 记录 git 提交号、工作区是否有未提交改动、Python 版本；数字能对回产生它的代码 |
-| 轨迹格式 | `miniagent/trajectory.py`（`SCHEMA_VERSION`、`validate_events`）| 格式是可执行的：`tests/conftest.py` 让**每个测试**产生的轨迹自动过一遍校验；`miniagent-eval check-trajectories <路径>` 可检查任意轨迹（没有 `schema_version` 的旧轨迹只做宽松检查） |
+| 评测配置严格校验 | `minicode/eval/config.py`，`tests/test_config.py` | 配置里的拼写错误（如 `require_reed`）曾经会被静默忽略，实验照跑但什么也没测；现在未知键、错类型、越界值、不存在的功能名/工具名/文件都直接报错，所有 `configs/*.json` 有测试保证合法 |
+| 运行溯源 | `minicode/provenance.py` | `meta.json` 和每条 `run_start` 记录 git 提交号、工作区是否有未提交改动、Python 版本；数字能对回产生它的代码 |
+| 轨迹格式 | `minicode/trajectory.py`（`SCHEMA_VERSION`、`validate_events`）| 格式是可执行的：`tests/conftest.py` 让**每个测试**产生的轨迹自动过一遍校验；`minicode-eval check-trajectories <路径>` 可检查任意轨迹（没有 `schema_version` 的旧轨迹只做宽松检查） |
 | 黄金轨迹回放 | `tests/golden/`，`scripts/make_golden.py`，`tests/test_golden_replay.py` | 7 条脚本化的轨迹（直路径、错误与恢复、两种压缩、步数耗尽、卡住检测、费用上限、`apply_patch` + `symbols`）在真实任务上录制，每次测试都用**当前**主循环回放，调用、错误、压缩时机、结束方式、工具输出都必须一致。里面没有第三方模型输出（模型是脚本，答案取自任务的参考解）。故意改变行为后用 `make golden` 重新生成并审阅 diff |
 | 变异检验 | 无脚本，是做法 | 写完测试后逐个破坏实现（去掉一道检查、改一个阈值），确认测试会失败；活下来的变异要么补测试，要么证明是冗余防线。最近一轮：执行器、压缩、会话、权限、MCP HTTP 约 100 处，最终幸存的都是冗余检查 |
 | 文档链接 | `tests/test_docs_links.py` | README 拆分后相对链接不能断 |
 | 覆盖率 | `pytest --cov`（`make cov`），CI 里 3.12 作业把摘要写进 job summary | 分支覆盖率下限 80%（`pyproject.toml`），本地不含 Docker 时约 84%。最弱的是 `eval/cli.py`（run / export / report 命令，约 37%）、`sandbox.py` 和 `taskgen/generate.py`（后两者要 Docker，由 CI 的 docker 作业运行）。下限只是防止丢测试的绊线，不是目标 |
 | 终端界面的无头测试 | `tests/test_tui.py`、`tests/test_cancel.py` | 用 Textual 的 pilot 在无头模式下驱动整个界面（脚本化模型、真实工作区、真实会话文件）：流式回答、工具卡片、审批面板的每个按键、打断、斜杠菜单与补全、`/diff` `/undo` `/steps`、侧栏、续聊时渲染历史、退出键。协作式取消（`Agent.cancel()`）单独测试：打断流式回复、杀掉正在跑的命令的整个进程组、取消后会话可继续。视觉效果用无头渲染的 SVG 截图检查；真实终端里用 pty 跑通过一遍（启动、输入、审批、退出码与退出摘要） |
-| 统计 | `miniagent/eval/stats.py`、`noise.py` | 比较两次运行的检验、Wilson 区间、噪声下限，见 [eval.md](eval.md) |
+| 统计 | `minicode/eval/stats.py`、`noise.py` | 比较两次运行的检验、Wilson 区间、噪声下限，见 [eval.md](eval.md) |
 
 ## 代码结构（agent 核心）
 
@@ -38,7 +38,7 @@ make check          # ruff + pytest + 黄金轨迹的格式检查（CI 跑的就
 
 ## 常见操作
 
-- **加一个评测配置键**：在 `miniagent/eval/config.py` 的 `_spec()` 里登记（类型和检查），否则配置会被拒绝；在 `runner.py` 里读取；写测试。
+- **加一个评测配置键**：在 `minicode/eval/config.py` 的 `_spec()` 里登记（类型和检查），否则配置会被拒绝；在 `runner.py` 里读取；写测试。
 - **加一种轨迹事件或字段**：改 `trajectory.py` 的文档和 `_REQUIRED` / `_OPTIONAL`，必要时升 `SCHEMA_VERSION`；让查看器（`eval/viewer/index.html`）认识它；`check-trajectories` 和 conftest 会替你检查所有产生方。
 - **改了主循环的行为**：先看 `tests/test_golden_replay.py` 是否失败。失败说明行为变了，确认是有意的再 `make golden`，并在提交说明里写出原因。
 - **新增 results 目录后**：`make results-index`。

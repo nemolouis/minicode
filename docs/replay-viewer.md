@@ -5,7 +5,7 @@
 ## 回放与对比（M3）
 
 ```bash
-miniagent-eval view results/<run-id> [results/<other-run-id> ...] [runs]
+minicode-eval view results/<run-id> [results/<other-run-id> ...] [runs]
 ```
 
 在本机起一个只读网页（默认 `http://127.0.0.1:8765/`），不需要任何前端依赖：
@@ -15,5 +15,5 @@ miniagent-eval view results/<run-id> [results/<other-run-id> ...] [runs]
   - 载入失败（轨迹不存在、格式错误）会弹出错误提示，不会静默无反应。
 - **Run A**：单次运行逐步回放：每步的模型输出、工具调用与参数、工具结果（可折叠）、耗时、token（含缓存与推理）、压缩事件和摘要内容；顶部有时间线，柱高是模型延迟，`C` 标记该步之前发生了压缩，点击跳转到对应步骤。
 - **Compare A / B**：两次运行的汇总对比（步数、token、耗时、压缩次数、工具报错）、并排时间线、按步骤对齐的并排视图，并标出第一次动作分叉的位置。例如把 `ctx3k` 和基线的同一题并排，能直接看到 B 每步前都在压缩（案例 2）。A、B 不是同一道题时顶部会给出警告（逐步对齐与分叉标记此时没有意义）；只选了一个时会明确提示缺的是哪个。B 只出现在对比页，没有单独的 "Run B" 页面，要单独回放请把它载入为 A。
-- 也支持直接用浏览器打开 `miniagent/eval/viewer/index.html`，用"Load A / Load B"载入单个 `trajectory.jsonl`（静态模式，没有运行列表）。早期格式的旧轨迹也能打开。
+- 也支持直接用浏览器打开 `minicode/eval/viewer/index.html`，用"Load A / Load B"载入单个 `trajectory.jsonl`（静态模式，没有运行列表）。早期格式的旧轨迹也能打开。
 - **安全**：服务只绑定 `127.0.0.1`，拒绝 Host 头不是本机的请求（防 DNS 重绑定），只提供页面和命令行给定目录内的 `trajectory.jsonl`（轨迹 id 严格校验，解析后的路径必须在目录内）；页面把轨迹内容全部当作文本渲染，不会执行其中的 HTML。

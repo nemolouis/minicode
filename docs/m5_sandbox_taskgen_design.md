@@ -48,7 +48,7 @@ Workspace(root) ── bind mount ──▶  /work  (读写)
 - `repo/`:被注入 bug 的源码 + **可见测试**(种子测试的一个子集)
 - `hidden/`:**完整**的种子测试(判分时覆盖可见测试)
 - `solution/`:原始(未变异)源码
-- 初始必须失败、参考解必须通过(沿用 `miniagent-eval verify`)
+- 初始必须失败、参考解必须通过(沿用 `minicode-eval verify`)
 
 不用 API:变异、运行测试、筛选全部在本地沙箱里完成。
 

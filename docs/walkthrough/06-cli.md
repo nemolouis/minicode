@@ -1,6 +1,6 @@
-# 06 · `miniagent/cli.py`:命令行入口
+# 06 · `minicode/cli.py`:命令行入口
 
-**作用**:把 `miniagent "任务" -w 仓库` 这样的命令行,变成对 `Agent.run()` 的调用。
+**作用**:把 `minicode "任务" -w 仓库` 这样的命令行,变成对 `Agent.run()` 的调用。
 
 ## 第 1–11 行
 
@@ -34,7 +34,7 @@ def _make_confirm(auto: bool):
 ## 第 30–61 行:`main`
 
 **参数定义(31–42 行)**:
-- `ArgumentParser(prog="miniagent")`:解析器。
+- `ArgumentParser(prog="minicode")`:解析器。
 - `ap.add_argument("task", ...)`:不带 `-` 的是**位置参数**,必填,即任务描述。
 - `-w/--workspace`:agent 可操作的仓库根目录,默认当前目录。
 - `-m/--model`:模型名。
@@ -59,4 +59,4 @@ def _make_confirm(auto: bool):
 if __name__ == "__main__":
     sys.exit(main())
 ```
-直接 `python miniagent/cli.py` 运行时才执行。通过 `pyproject.toml` 里 `miniagent = "miniagent.cli:main"` 安装后,`miniagent` 命令就是直接调用 `main`。
+直接 `python minicode/cli.py` 运行时才执行。通过 `pyproject.toml` 里 `minicode = "minicode.cli:main"` 安装后,`minicode` 命令就是直接调用 `main`。

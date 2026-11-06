@@ -18,13 +18,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from miniagent.agent import Agent                                    # noqa: E402
-from miniagent.budget import Budget                                 # noqa: E402
-from miniagent.client import ModelResponse, ToolCall                 # noqa: E402
-from miniagent.eval.grade import copy_repo                           # noqa: E402
-from miniagent.eval.tasks import load_tasks                          # noqa: E402
-from miniagent.tools import Workspace                                # noqa: E402
-from miniagent.trajectory import Trajectory                          # noqa: E402
+from minicode.agent import Agent                                    # noqa: E402
+from minicode.budget import Budget                                 # noqa: E402
+from minicode.client import ModelResponse, ToolCall                 # noqa: E402
+from minicode.eval.grade import copy_repo                           # noqa: E402
+from minicode.eval.tasks import load_tasks                          # noqa: E402
+from minicode.tools import Workspace                                # noqa: E402
+from minicode.trajectory import Trajectory                          # noqa: E402
 
 OUT = ROOT / "tests" / "golden"
 

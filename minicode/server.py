@@ -12,7 +12,7 @@ A service that lets a model run commands is a remote-execution surface, so the d
 - a client never names a path: `workspace` is a key into the allow-list the server was started with, and every run
   works on a private COPY of that directory (the original is never touched);
 - bash runs in the Docker sandbox; without it (--no-sandbox) bash is refused and only read/edit tools work;
-- it listens on 127.0.0.1, and a non-loopback host is refused unless an API key (MINIAGENT_API_KEY) is set;
+- it listens on 127.0.0.1, and a non-loopback host is refused unless an API key (MINICODE_API_KEY) is set;
 - task length, step count, model name and the number of queued runs are capped.
 """
 from __future__ import annotations
@@ -38,7 +38,7 @@ try:
     from fastapi.responses import PlainTextResponse, RedirectResponse, StreamingResponse
     from pydantic import BaseModel, Field
 except ImportError as e:  # pragma: no cover - only without the optional dependency
-    raise ImportError("miniagent.server needs FastAPI: pip install -e '.[serve]'") from e
+    raise ImportError("minicode.server needs FastAPI: pip install -e '.[serve]'") from e
 
 from .agent import Agent
 from .tools import Workspace
@@ -118,7 +118,7 @@ class Service:
         self.sandbox_factory = sandbox_factory
         self.runs: dict[str, Run] = {}
         self.lock = threading.Lock()
-        self.pool = ThreadPoolExecutor(max_workers=max_concurrent, thread_name_prefix="miniagent-run")
+        self.pool = ThreadPoolExecutor(max_workers=max_concurrent, thread_name_prefix="minicode-run")
 
     # ---- submit / execute
     def submit(self, req: RunRequest) -> Run:
@@ -191,7 +191,7 @@ class Service:
 
 
 def create_app(service: Service, api_key: str | None = None) -> FastAPI:
-    app = FastAPI(title="mini-agent", version="0.1.0")
+    app = FastAPI(title="minicode", version="0.1.0")
 
     def auth(x_api_key: str | None = Header(default=None)) -> None:
         if api_key and not (x_api_key and hmac.compare_digest(x_api_key.encode(), api_key.encode())):
@@ -249,7 +249,7 @@ def create_app(service: Service, api_key: str | None = None) -> FastAPI:
 
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(prog="miniagent-serve", description="HTTP service around the mini-agent loop")
+    ap = argparse.ArgumentParser(prog="minicode-serve", description="HTTP service around the minicode loop")
     ap.add_argument("--workspace", action="append", required=True, metavar="NAME=PATH",
                     help="a directory the service may copy and let the agent work on; repeatable")
     ap.add_argument("--host", default="127.0.0.1")
@@ -260,9 +260,9 @@ def main(argv=None) -> int:
     ap.add_argument("--no-sandbox", action="store_true", help="run without Docker: bash is refused, only read/edit tools work")
     args = ap.parse_args(argv)
 
-    api_key = os.environ.get("MINIAGENT_API_KEY") or None
+    api_key = os.environ.get("MINICODE_API_KEY") or None
     if args.host not in ("127.0.0.1", "localhost", "::1") and not api_key:
-        print("error: a non-loopback host needs MINIAGENT_API_KEY to be set", file=sys.stderr)
+        print("error: a non-loopback host needs MINICODE_API_KEY to be set", file=sys.stderr)
         return 2
     workspaces = {}
     for item in args.workspace:
@@ -275,7 +275,7 @@ def main(argv=None) -> int:
         from .sandbox import available
         if not available():
             print("error: the sandbox image is missing or Docker is not running "
-                  "(miniagent-eval sandbox-build), or start with --no-sandbox", file=sys.stderr)
+                  "(minicode-eval sandbox-build), or start with --no-sandbox", file=sys.stderr)
             return 2
     from .client import APIError, ChatClient
     try:

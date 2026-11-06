@@ -6,7 +6,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
-from miniagent.mcp.client import MAX_HTTP_RESPONSE, McpError, McpHttpClient, McpTimeout, mcp_session
+from minicode.mcp.client import MAX_HTTP_RESPONSE, McpError, McpHttpClient, McpTimeout, mcp_session
 
 MODERN = "2026-07-28"
 

@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from miniagent.eval.replay import replay_run
-from miniagent.trajectory import validate_events
+from minicode.eval.replay import replay_run
+from minicode.trajectory import validate_events
 
 GOLDEN = Path(__file__).parent / "golden"
 NAMES = sorted(p.name for p in GOLDEN.iterdir() if p.is_dir())

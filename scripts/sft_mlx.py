@@ -20,8 +20,8 @@ from pathlib import Path
 
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))        # miniagent is standard library only: importable from .venv-mlx
-from miniagent.trainguard import TrainingDiverged, make_guard  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))        # minicode is standard library only: importable from .venv-mlx
+from minicode.trainguard import TrainingDiverged, make_guard  # noqa: E402
 
 
 def load_rows(path: str, limit: int | None = None) -> list[dict]:

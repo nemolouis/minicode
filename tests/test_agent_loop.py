@@ -2,10 +2,10 @@
 import copy
 import json
 
-from miniagent.agent import Agent
-from miniagent.client import ModelResponse, ToolCall
-from miniagent.tools import Workspace
-from miniagent.trajectory import Trajectory
+from minicode.agent import Agent
+from minicode.client import ModelResponse, ToolCall
+from minicode.tools import Workspace
+from minicode.trajectory import Trajectory
 
 
 def text(t): return t

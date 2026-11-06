@@ -12,11 +12,11 @@
 ```
 
 ```bash
-miniagent-eval sandbox-build                                              # 沙箱镜像(需要 Docker)
-miniagent-eval gen --seeds seeds --out gen_tasks --per-seed 24            # 生成任务
-miniagent-eval --tasks-root gen_tasks verify --sandbox --workers 4        # 每题:初始必须失败、参考解必须通过
-miniagent-eval --tasks-root gen_tasks run --config configs/gen-synth-flash.json --split train --sandbox --workers 4 --repeat 2
-miniagent-eval export results/<run-dir> --out data/sft_train_v2.jsonl --models deepseek-flash
+minicode-eval sandbox-build                                              # 沙箱镜像(需要 Docker)
+minicode-eval gen --seeds seeds --out gen_tasks --per-seed 24            # 生成任务
+minicode-eval --tasks-root gen_tasks verify --sandbox --workers 4        # 每题:初始必须失败、参考解必须通过
+minicode-eval --tasks-root gen_tasks run --config configs/gen-synth-flash.json --split train --sandbox --workers 4 --repeat 2
+minicode-eval export results/<run-dir> --out data/sft_train_v2.jsonl --models deepseek-flash
 # 训练在单独的环境里(Python venv + mlx-lm),脚本见 scripts/sft_mlx.py:
 python3 -m venv .venv-mlx && .venv-mlx/bin/pip install --only-binary :all: mlx-lm
 .venv-mlx/bin/python scripts/sft_mlx.py check --model models/<m> --data data/sft_train_v2.jsonl     # 验证 token 数与助手轮掩码

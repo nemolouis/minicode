@@ -6,14 +6,14 @@ import time
 
 import pytest
 
-from miniagent.agent import Agent
-from miniagent.client import ModelResponse, ToolCall
-from miniagent.eval.grade import trajectory_stats
-from miniagent.features import EXPLORE_PROMPT, MEMORY_LIMIT
-from miniagent.sandbox import SandboxError
-from miniagent.schema import signature, validate
-from miniagent.tools import Tool, Workspace
-from miniagent.trajectory import Trajectory
+from minicode.agent import Agent
+from minicode.client import ModelResponse, ToolCall
+from minicode.eval.grade import trajectory_stats
+from minicode.features import EXPLORE_PROMPT, MEMORY_LIMIT
+from minicode.sandbox import SandboxError
+from minicode.schema import signature, validate
+from minicode.tools import Tool, Workspace
+from minicode.trajectory import Trajectory
 
 
 def call(cid, name, **inp): return ToolCall(cid, name, json.dumps(inp))
@@ -215,7 +215,7 @@ def test_glob_tool(tmp_path):
     (outside / "leak.py").write_text("")
     (tmp_path / "link.py").symlink_to(outside / "leak.py")
     ws = Workspace(tmp_path)
-    from miniagent.tools import ToolError, glob_tool
+    from minicode.tools import ToolError, glob_tool
     g = glob_tool(ws).func
     assert g({"pattern": "**/*.py"}) == "pkg/a.py"
     for bad in ("../*", "/etc/*"):

@@ -1,8 +1,8 @@
 """`--git`: do the agent's work on its own branch and commit it as it goes, like the mainstream coding agents.
 
-* the run starts from a clean tree (uncommitted work of yours is never swept into an agent commit); a new branch `miniagent/<name>` is
-  cut from the current HEAD, or, if you are already on a `miniagent/` branch (a resumed session), that branch is continued;
-* after every tool turn that changed files, one commit (author and committer "miniagent", hooks and signing skipped);
+* the run starts from a clean tree (uncommitted work of yours is never swept into an agent commit); a new branch `minicode/<name>` is
+  cut from the current HEAD, or, if you are already on a `minicode/` branch (a resumed session), that branch is continued;
+* after every tool turn that changed files, one commit (author and committer "minicode", hooks and signing skipped);
 * only paths the AGENT changed are staged: modified/deleted tracked files, and untracked files that did not exist when the run began, so
   an untracked scratch file of yours stays untracked; ignored files are never added; the run directory is excluded when it lives
   inside the repository;
@@ -14,8 +14,8 @@ import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
-AUTHOR = ["-c", "user.name=miniagent", "-c", "user.email=miniagent@localhost", "-c", "commit.gpgsign=false"]
-BRANCH_PREFIX = "miniagent/"
+AUTHOR = ["-c", "user.name=minicode", "-c", "user.email=minicode@localhost", "-c", "commit.gpgsign=false"]
+BRANCH_PREFIX = "minicode/"
 
 
 class GitError(Exception):
@@ -110,7 +110,7 @@ class GitSession:
         files = [f for f in staged if f]
         if not files:
             return None
-        msg = f"miniagent: step {step}: {summary}"[:200]
+        msg = f"minicode: step {step}: {summary}"[:200]
         _git(self.root, *AUTHOR, "commit", "--no-verify", "-q", "-m", msg)
         sha = _git(self.root, "rev-parse", "HEAD").stdout.strip()
         self.commits.append(sha)

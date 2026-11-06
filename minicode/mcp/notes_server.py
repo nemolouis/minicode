@@ -1,6 +1,6 @@
 """A small MCP server over a directory of notes, speaking JSON-RPC on stdio.
 
-    python -m miniagent.mcp.notes_server --root NOTES_DIR [--allow-write] [--allow-tools a,b]
+    python -m minicode.mcp.notes_server --root NOTES_DIR [--allow-write] [--allow-tools a,b]
 
 Protocol (checked against the MCP specification): newline-delimited UTF-8 JSON-RPC on stdin/stdout, logs
 on stderr, exit when stdin closes. The server is *dual-era*:
@@ -22,7 +22,7 @@ import time
 
 from .safepath import Denied, Scan, TooLarge, clean_text, make_policy, open_file, read_all, show, validate_rel
 
-SERVER_INFO = {"name": "miniagent-notes", "version": "0.1.0"}
+SERVER_INFO = {"name": "minicode-notes", "version": "0.1.0"}
 MODERN_VERSIONS = ("2026-07-28",)
 LEGACY_VERSIONS = ("2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05")
 META_VERSION = "io.modelcontextprotocol/protocolVersion"
@@ -338,7 +338,7 @@ def serve(server: NotesServer, stdin=None, stdout=None) -> None:
 
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(prog="miniagent-notes-server")
+    ap = argparse.ArgumentParser(prog="minicode-notes-server")
     ap.add_argument("--root", required=True, help="notes directory (the only place the server can read or write)")
     ap.add_argument("--allow-write", action="store_true", help="enable the append_note tool (off by default)")
     ap.add_argument("--allow-tools", help="comma-separated whitelist of tool names; others behave as if they did not exist")

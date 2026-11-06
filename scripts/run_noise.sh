@@ -8,8 +8,8 @@ CFG="${1:-flash}"; N="${2:-3}"
 STAMP=$(date +%Y%m%d-%H%M%S)
 DIRS=()
 for i in $(seq 1 "$N"); do
-  miniagent-eval run --config "configs/$CFG.json" --split dev --tasks b --repeat 3 --workers 4 --run-id "$STAMP-noise$i-$CFG" >/dev/null
+  minicode-eval run --config "configs/$CFG.json" --split dev --tasks b --repeat 3 --workers 4 --run-id "$STAMP-noise$i-$CFG" >/dev/null
   DIRS+=("results/$STAMP-noise$i-$CFG")
   echo "replicate $i done: results/$STAMP-noise$i-$CFG"
 done
-miniagent-eval noise "${DIRS[@]}" --out "results/$STAMP-noise-$CFG.md"
+minicode-eval noise "${DIRS[@]}" --out "results/$STAMP-noise-$CFG.md"

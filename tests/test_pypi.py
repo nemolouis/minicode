@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from miniagent.taskgen import pypi
-from miniagent.taskgen.pypi import UnsafeArchive, download, safe_extract
+from minicode.taskgen import pypi
+from minicode.taskgen.pypi import UnsafeArchive, download, safe_extract
 
 
 def make_tar(path: Path, members):
