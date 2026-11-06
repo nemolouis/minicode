@@ -16,6 +16,7 @@ from ..permissions import Permissions, RuleError
 from ..tools import build_tools, Workspace
 
 _NUM = (int, float)
+FEATURE_TOOLS = {"glob", "todo_write", "explore", "apply_patch", "symbols", "bash_background", "bash_output", "bash_kill"}
 
 
 def _spec():
@@ -31,6 +32,8 @@ def _spec():
         "tool_result_json": (bool, ""), "text_tool_calls": (bool, ""),
         "permissions": (dict, "permissions"), "mcp_servers": (list, "mcp"),
         "system_prompt_file": (str, "file"),
+        "output_budget": (bool, ""), "stuck_warn_after": (int, "stuck"), "stuck_stop_after": (int, "pos"),
+        "max_cost_usd": (_NUM, "pos"), "max_total_tokens": (int, "pos"), "price_tier": (str, "tier"), "prices_file": (str, "file"),
         "api_key_env": (str, ""), "base_url": (str, "url"), "base_url_env": (str, ""), "api_style": (str, "api_style"),
         "api_timeout": (_NUM, "pos"), "api_retries": (int, "nonneg"), "extra_body": (dict, ""),
     }
@@ -71,9 +74,10 @@ def validate_config(cfg, *, check_files: bool = True) -> list[str]:
             if not all(isinstance(t, str) for t in v):
                 errs.append("disabled_tools: must be a list of strings")
             else:
-                bad = [t for t in v if t not in builtin | {"glob", "todo_write", "explore"} and not t.startswith("mcp__")]
+                known = builtin | FEATURE_TOOLS
+                bad = [t for t in v if t not in known and not t.startswith("mcp__")]
                 if bad:
-                    errs.append(f"disabled_tools: unknown tools {bad}; known: {sorted(builtin | {'glob', 'todo_write', 'explore'})}")
+                    errs.append(f"disabled_tools: unknown tools {bad}; known: {sorted(known)}")
         elif check == "features":
             bad = [f for f in v if f not in FEATURES]
             if bad or not all(isinstance(f, str) for f in v):
@@ -83,6 +87,10 @@ def validate_config(cfg, *, check_files: bool = True) -> list[str]:
                 Permissions.from_dict(v)
             except RuleError as e:
                 errs.append(f"permissions: {e}")
+        elif check == "stuck" and v != 0 and v < 2:
+            errs.append(f"stuck_warn_after: 0 (off) or >= 2, got {v}")
+        elif check == "tier" and v not in ("off_peak", "peak"):
+            errs.append(f"price_tier: must be 'off_peak' or 'peak', got {v!r}")
         elif check == "api_style" and v not in ("openai", "gemini"):
             errs.append(f"api_style: must be 'openai' or 'gemini', got {v!r}")
         elif check == "url" and not v.startswith(("http://", "https://")):
@@ -93,6 +101,9 @@ def validate_config(cfg, *, check_files: bool = True) -> list[str]:
             for i, s in enumerate(v):
                 if not isinstance(s, dict) or not s.get("allow") or ("command" in s) == ("url" in s):
                     errs.append(f"mcp_servers[{i}]: needs a non-empty 'allow' and exactly one of 'command' / 'url'")
+    w, s_ = cfg.get("stuck_warn_after", 0), cfg.get("stuck_stop_after", 6)
+    if isinstance(w, int) and isinstance(s_, int) and w >= 2 and s_ <= w:
+        errs.append(f"stuck_stop_after ({s_}) must be greater than stuck_warn_after ({w})")
     if cfg.get("base_url") and cfg.get("base_url_env"):
         errs.append("base_url and base_url_env are both set; use one")
     return errs

@@ -25,11 +25,22 @@ class ToolError(Exception):
     pass
 
 
-def truncate(text: str, limit: int = MAX_OUTPUT_CHARS) -> str:
+def truncate(text: str, limit: int = MAX_OUTPUT_CHARS, hint: str = "") -> str:
+    """Keep the head and the tail of a long output and say how much was cut and (with `hint`) how to get the rest."""
     if len(text) <= limit:
         return text
     half = limit // 2
-    return f"{text[:half]}\n...[truncated {len(text) - limit} chars]...\n{text[-half:]}"
+    lines = text.count("\n") + 1
+    return (f"{text[:half]}\n...[truncated {len(text) - limit} of {len(text)} chars from the middle ({lines} lines in all)"
+            f"{'; ' + hint if hint else ''}]...\n{text[-half:]}")
+
+
+def output_limit_for(context_limit: int, last_input_tokens: int, trigger_fraction: float = 0.7) -> int:
+    """How many characters one tool output may take, given how much room is left before the context gets compacted: half of the
+    headroom (3 chars per token, the same estimate compaction uses), but never below 2000 or above MAX_OUTPUT_CHARS. A fresh
+    context allows the full 20000; a nearly full one still gets 2000 characters, enough to see an error."""
+    headroom = max(int(context_limit * trigger_fraction) - last_input_tokens, 0)
+    return max(2000, min(MAX_OUTPUT_CHARS, headroom * 3 // 2))
 
 
 @dataclass
@@ -60,6 +71,7 @@ class Workspace:
         self.require_read = require_read
         self.diagnostics = diagnostics
         self.seen: set[Path] = set()        # files the model has read or written in this run (resolved paths)
+        self.output_limit = MAX_OUTPUT_CHARS   # characters per tool output; the agent lowers it as the context fills (output_budget)
         if not self.root.is_dir():
             raise ValueError(f"workspace is not a directory: {self.root}")
 
@@ -82,10 +94,19 @@ class Workspace:
             raise ToolError("file is not valid UTF-8 text")
         self.seen.add(p)
         chunk = lines[offset - 1 : offset - 1 + limit]
-        out = "\n".join(f"{i:>6}\t{l}" for i, l in enumerate(chunk, start=offset))
-        if offset - 1 + limit < len(lines):
-            out += f"\n... ({len(lines) - (offset - 1 + limit)} more lines, use offset)"
-        return truncate(out) or "(empty file)"
+        shown, size = [], 0
+        for i, l in enumerate(chunk, start=offset):                  # whole lines only, so the model knows exactly where to continue
+            row = f"{i:>6}\t{l}"
+            if shown and size + len(row) + 1 > self.output_limit:
+                break
+            shown.append(row)
+            size += len(row) + 1
+        out = "\n".join(shown)
+        last = offset - 1 + len(shown)                              # number of the last line shown
+        if last < len(lines):
+            why = "output size limit" if len(shown) < len(chunk) else f"{limit}-line limit"
+            out += f"\n... ({len(lines) - last} more lines after line {last}, cut by the {why}: call read_file with offset={last + 1})"
+        return truncate(out, max(self.output_limit, 2000)) or "(empty file)"
 
     def write_file(self, args: dict) -> str:
         p = self.resolve(args["path"])
@@ -178,7 +199,34 @@ class Workspace:
                           env={**os.environ, "GIT_PAGER": "cat", "PAGER": "cat"})
         if r.timed_out:
             raise ToolError(f"command timed out after {timeout}s")
-        return truncate(f"exit code: {r.returncode}\n{r.stdout}{r.stderr}".rstrip())
+        return truncate(f"exit code: {r.returncode}\n{r.stdout}{r.stderr}".rstrip(), self.output_limit,
+                        "to see the cut part, re-run with `| head -n N`, `| tail -n N` or `> out.txt` and use grep / read_file on the file")
+
+    def apply_patch(self, args: dict) -> str:
+        from . import patch as P
+        try:
+            changes = P.plan(self.root, self.resolve, args["patch"],
+                             read_ok=(lambda p: p in self.seen) if self.require_read else None)
+            P.commit(changes)
+        except P.PatchError as e:
+            raise ToolError(str(e))
+        except OSError as e:
+            raise ToolError(f"patch not applied, files restored: {type(e).__name__}: {e}")
+        notes = []
+        for kind, p, old, new in changes:
+            rel = p.relative_to(self.root).as_posix()
+            if kind == "delete":
+                notes.append(f"deleted {rel}")
+                self.seen.discard(p)
+                continue
+            self.seen.add(p)
+            added = len(new.splitlines()) - (len(old.splitlines()) if old is not None else 0)
+            notes.append(f"{'added' if kind == 'add' else 'updated'} {rel} ({added:+d} lines)" + self._diagnose(p, new))
+        return "applied patch: " + "; ".join(notes)
+
+    def symbols(self, args: dict) -> str:
+        from .symbols import symbols
+        return symbols(self.root, self.resolve, args)
 
     def glob(self, args: dict) -> str:
         pat = args["pattern"]
@@ -206,17 +254,28 @@ class Workspace:
             f for f in sorted(base.rglob(glob or "*"))
             if f.is_file() and not (SKIP_DIRS & set(f.relative_to(self.root).parts))
         )
+        try:
+            skip, cap = max(int(args.get("offset", 0)), 0), min(max(int(args.get("max_results", 200)), 1), 200)
+        except (TypeError, ValueError):
+            raise ToolError("offset and max_results must be integers")
         hits: list[str] = []
+        seen = 0                                                     # matches found so far, including the skipped ones
         for f in files:
             try:
                 for i, line in enumerate(f.read_text(encoding="utf-8").splitlines(), 1):
                     if rx.search(line):
+                        seen += 1
+                        if seen <= skip:
+                            continue
+                        if len(hits) >= cap:                        # one more than we may show: there is more
+                            return ("\n".join(hits) + f"\n... (showing matches {skip + 1}-{skip + cap}; more exist: call grep again with "
+                                    f"offset={skip + cap}, or narrow the pattern, path or glob)")
                         hits.append(f"{f.relative_to(self.root)}:{i}:{line[:300]}")
-                        if len(hits) >= 200:
-                            return "\n".join(hits) + "\n... (stopped at 200 matches)"
             except (UnicodeDecodeError, OSError):
                 continue
-        return "\n".join(hits) or "no matches"
+        if not hits and skip:
+            return f"no matches after the first {skip}"
+        return truncate("\n".join(hits), self.output_limit) or "no matches"
 
 
 def build_tools(ws: Workspace) -> dict[str, Tool]:
@@ -236,10 +295,32 @@ def build_tools(ws: Workspace) -> dict[str, Tool]:
              ws.bash, needs_confirm=True),
         Tool("grep", "Regex search over files (skips .git, node_modules, venvs). Returns path:line:text.",
              S(pattern={"type": "string"}, path={"type": "string", "description": "file or dir, default '.'", "optional": True},
-               glob={"type": "string", "description": "e.g. '*.py'", "optional": True}),
+               glob={"type": "string", "description": "e.g. '*.py'", "optional": True},
+               offset={"type": "integer", "description": "skip this many matches (to page through a long result)", "optional": True},
+               max_results={"type": "integer", "description": "matches to return (default and maximum 200)", "optional": True}),
              ws.grep, read_only=True),
     ]
     return {t.name: t for t in tools}
+
+
+def patch_tool(ws: Workspace) -> Tool:
+    """Opt-in (features "patch"): several files edited in one call, all or nothing. See miniagent.patch for the format."""
+    return Tool("apply_patch",
+                "Edit several files in one call, atomically: if any part fails, no file is changed. Format:\n"
+                "*** Begin Patch\n*** Update File: path\n@@ optional anchor text (a line of the file to search after)\n context line\n"
+                "-line to remove\n+line to add\n*** Add File: path\n+content line\n*** Delete File: path\n*** End Patch\n"
+                "Context and removed lines must match the file exactly and occur once (use @@ to disambiguate). Read files first.",
+                {"type": "object", "properties": {"patch": {"type": "string"}}, "required": ["patch"]}, ws.apply_patch, needs_confirm=True)
+
+
+def symbols_tool(ws: Workspace) -> Tool:
+    """Opt-in (features "symbols"): where Python classes and functions are defined, without reading the files."""
+    return Tool("symbols",
+                "Outline of Python definitions (classes, functions with signatures, UPPERCASE constants) with line numbers, for a file "
+                "or a directory tree. Use `query` to keep only names containing a substring. Definitions only, no references.",
+                {"type": "object", "properties": {"path": {"type": "string", "description": "file or dir, default '.'"},
+                                                   "query": {"type": "string", "description": "substring of the name"}}},
+                ws.symbols, read_only=True)
 
 
 def glob_tool(ws: Workspace) -> Tool:

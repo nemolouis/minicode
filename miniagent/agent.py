@@ -10,13 +10,15 @@ from typing import Callable
 
 from . import compaction
 from .client import ModelResponse
+from .budget import Budget
 from .compaction import SUMMARY_PROMPT  # noqa: F401  (re-exported: it used to live here)
 from .executor import ToolExecutor
-from .features import FEATURES, explore_tool, render_todos, todo_tool, with_project_memory
+from .features import FEATURES, background_tools, explore_tool, render_todos, todo_tool, with_project_memory
 from .permissions import Permissions
 from .provenance import provenance
 from .session import Recorder
-from .tools import Tool, Workspace, build_tools, glob_tool
+from .stuck import StuckDetector, notice as stuck_notice
+from .tools import Tool, Workspace, build_tools, glob_tool, output_limit_for, patch_tool, symbols_tool
 from .trajectory import SCHEMA_VERSION, Trajectory
 
 SYSTEM_PROMPT = """You are a coding agent working inside a git-style repository. \
@@ -72,6 +74,16 @@ class Agent:
     permissions: Permissions | None = None
     # Write session.json and workspace checkpoints next to the trajectory so the run can be resumed / rewound (miniagent.session).
     session: bool = False
+    # Stuck detection (miniagent.stuck): after this many identical calls with identical results in a row (or consecutive errors
+    # of one kind) a notice is appended to the tool result; after stuck_stop_after the run ends with status "stuck". 0 = off.
+    stuck_warn_after: int = 0
+    stuck_stop_after: int = 6
+    # Hard spending limits (miniagent.budget): the run ends with status "budget" before the request that would exceed them.
+    budget: Budget | None = None
+    # Scale the size of one tool output to the room left before compaction (tools.output_limit_for). Off: always 20000 characters.
+    output_budget: bool = False
+    # Called with each piece of reply text as it streams in (OpenAI-compatible clients only); None = no streaming.
+    on_text: Callable[[str], None] | None = None
 
     def __post_init__(self):
         bad = set(self.features) - FEATURES
@@ -85,6 +97,13 @@ class Agent:
         tools = {**build_tools(self.workspace), **self.extra_tools}
         if "glob" in self.features or "explore" in self.features:
             tools["glob"] = glob_tool(self.workspace)
+        self.background = None
+        if "patch" in self.features:
+            tools["apply_patch"] = patch_tool(self.workspace)
+        if "symbols" in self.features:
+            tools["symbols"] = symbols_tool(self.workspace)
+        if "background" in self.features:
+            tools.update(background_tools(self))
         if "todo" in self.features:
             tools["todo_write"] = todo_tool(self)
         if "explore" in self.features:
@@ -115,6 +134,8 @@ class Agent:
         executor = ToolExecutor(self.tools, confirm=self.confirm, trajectory=self.trajectory, root=self.workspace.root,
                                 permissions=self.permissions, validate_args=self.validate_args, parallel=self.parallel_tools)
         self._log_start(task, resume is not None)
+        stuck = StuckDetector(self.stuck_warn_after, self.stuck_stop_after) if self.stuck_warn_after > 0 else None
+        spent = {"uncached": 0, "cached": 0, "out": 0}      # this loop's own model calls; sub-agent usage is added when checking
 
         in_tok = out_tok = 0
         last_input = resume.get("last_input", 0) if resume else 0
@@ -122,9 +143,14 @@ class Agent:
         awaiting_floor = False
         final_text = ""
         status = "max_steps"
-        step = base
+        step = completed = base            # `completed`: the last step whose turn (model call + all its tool results) finished
         try:
             for step in range(base + 1, base + self.max_steps + 1):
+                if self.budget and (why := self._over_budget(spent)):
+                    self.trajectory.log("budget", step=step, reason=why, **self._spent_summary(spent))
+                    status = "budget"
+                    step -= 1                     # this step never ran
+                    break
                 if last_input > self._compact_trigger(floor):
                     messages = self._compact(messages, trigger_tokens=last_input)
                     awaiting_floor = True
@@ -143,29 +169,80 @@ class Agent:
                                             note="compaction could not get below the threshold; next one waits for regrowth")
                 in_tok += last_input
                 out_tok += resp.usage["output_tokens"]
+                cached = resp.usage.get("cache_hit_tokens", 0) or 0
+                spent["cached"] += cached
+                spent["uncached"] += max(last_input - cached, 0)
+                spent["out"] += resp.usage["output_tokens"]
                 messages.append(_assistant_message(resp))
                 final_text = resp.text
 
                 if resp.tool_calls:
+                    if self.output_budget:
+                        self.workspace.output_limit = output_limit_for(self.context_limit, last_input)
                     rec.checkpoint(step, calls, self.tools, self.trajectory)
-                    messages.extend(executor.run(step, calls))
+                    results = executor.run(step, calls)
+                    stop_stuck = False
+                    if stuck:
+                        stop_stuck = self._check_stuck(stuck, step, calls, results, executor.last_results)
+                    messages.extend(results)
+                    completed = step
                     rec.save(messages, step, last_input, self.todos)
+                    if stop_stuck:
+                        status = "stuck"
+                        break
                     continue
                 status = "done" if resp.finish_reason == "stop" else resp.finish_reason
                 rec.save(messages, step, last_input, self.todos)
                 break
+        except KeyboardInterrupt:
+            # Ctrl-C: leave a session that --resume can continue from. A turn cut off in the middle has an assistant message whose
+            # tool calls have no results; the API rejects such a history, so every unanswered call gets an explicit note.
+            closed = _close_dangling_calls(messages)
+            done_step = step if closed is not messages else completed     # notes were needed: the turn of `step` was cut in the middle
+            messages = closed
+            rec.save(messages, done_step, last_input, self.todos)
+            self.trajectory.log("run_end", status="interrupted", steps=done_step, input_tokens=in_tok, output_tokens=out_tok,
+                                final_text=final_text)
+            return RunResult("interrupted", done_step, final_text, in_tok, out_tok)
         except Exception as e:  # API failure etc.; keep the trajectory consistent
             self.trajectory.log("run_end", status="error", steps=step, error=repr(e),
                                 input_tokens=in_tok, output_tokens=out_tok, final_text=final_text)
             return RunResult("error", step, final_text, in_tok, out_tok, repr(e))
+        finally:
+            if self.background is not None:
+                self.background.kill_all()          # no job outlives the run
 
         in_tok += self.sub_usage["input"]
         out_tok += self.sub_usage["output"]       # sub-agent tokens are real spend: they count in the run totals
+        cost = self.budget.cost(spent["uncached"] + self.sub_usage["input"], spent["cached"], spent["out"] + self.sub_usage["output"]) \
+            if self.budget else None
         self.trajectory.log("run_end", status=status, steps=step, input_tokens=in_tok,
                             output_tokens=out_tok, final_text=final_text,
+                            **({"cost_usd": round(cost, 6)} if cost is not None else {}),
                             **({"subagent_input_tokens": self.sub_usage["input"], "subagent_output_tokens": self.sub_usage["output"]}
                                if self.sub_usage["input"] or self.sub_usage["output"] else {}))
         return RunResult(status, step, final_text, in_tok, out_tok)
+
+    def _check_stuck(self, stuck: StuckDetector, step: int, calls: list[dict], messages: list[dict], raw: list[dict]) -> bool:
+        """Feed the turn's raw results to the detector, append notices to the tool `messages`, log events. True = stop the run."""
+        stop = False
+        for i, (call, r) in enumerate(zip(calls, raw)):
+            ev = stuck.observe(call, r)
+            if ev is None:
+                continue
+            self.trajectory.log("stuck", step=step, tool_call_id=call["id"], kind=ev.kind, count=ev.count, action=ev.action)
+            messages[i]["content"] += stuck_notice(ev)
+            stop = stop or ev.action == "stop"
+        return stop
+
+    def _spent_summary(self, spent: dict) -> dict:
+        tokens = spent["uncached"] + spent["cached"] + spent["out"] + self.sub_usage["input"] + self.sub_usage["output"]
+        cost = self.budget.cost(spent["uncached"] + self.sub_usage["input"], spent["cached"], spent["out"] + self.sub_usage["output"])
+        return {"spent_tokens": tokens, **({"spent_usd": round(cost, 6)} if cost is not None else {})}
+
+    def _over_budget(self, spent: dict) -> str | None:
+        s = self._spent_summary(spent)
+        return self.budget.exceeded(s["spent_tokens"], s.get("spent_usd"))
 
     def _system_sha1(self) -> str:
         return hashlib.sha1(self.system.encode()).hexdigest()[:12]
@@ -181,6 +258,10 @@ class Agent:
                     **({"features": sorted(self.features)} if self.features else {}),
                     **({"workspace_options": opts} if opts else {}),
                     **({"permissions": self.permissions.to_dict()} if self.permissions else {}),
+                    **({"output_budget": True} if self.output_budget else {}),
+                    **({"stuck": {"warn_after": self.stuck_warn_after, "stop_after": self.stuck_stop_after}} if self.stuck_warn_after else {}),
+                    **({"budget": {"max_cost_usd": self.budget.max_cost_usd, "max_total_tokens": self.budget.max_total_tokens,
+                                   "price": self.budget.price}} if self.budget else {}),
                     "system_sha1": self._system_sha1()},
             # full text, so the exact model input can be rebuilt later (SFT export) without guessing from a hash
             system=self.system, tool_specs=[t.spec() for t in self.tools.values()])
@@ -188,9 +269,10 @@ class Agent:
     def _model_step(self, step: int, messages: list[dict]) -> tuple[ModelResponse, list[dict]]:
         """One model request; logs the `model_call` event. Returns the response and its parsed tool calls."""
         t0 = time.time()
+        extra = {"on_text": self.on_text} if self.on_text is not None else {}
         resp: ModelResponse = self.client.chat(
             model=self.model, max_tokens=self.max_tokens, system=self.system,
-            tools=[t.spec() for t in self.tools.values()], messages=messages, temperature=self.temperature)
+            tools=[t.spec() for t in self.tools.values()], messages=messages, temperature=self.temperature, **extra)
         calls = [_parse_call(c) for c in resp.tool_calls]
         self.trajectory.log(
             "model_call", step=step, latency_s=round(time.time() - t0, 3),
@@ -224,6 +306,19 @@ def _parse_call(c) -> dict:
         return {"id": c.id, "name": c.name, "input": args}
     except ValueError as e:
         return {"id": c.id, "name": c.name, "input": {"_raw_arguments": c.arguments}, "parse_error": str(e)}
+
+
+def _close_dangling_calls(messages: list[dict]) -> list[dict]:
+    """If the last assistant message has tool calls without matching tool messages, add one per missing call."""
+    last = next((i for i in range(len(messages) - 1, -1, -1) if messages[i]["role"] == "assistant"), None)
+    if last is None:
+        return messages
+    answered = {m.get("tool_call_id") for m in messages[last + 1:] if m["role"] == "tool"}
+    missing = [c["id"] for c in messages[last].get("tool_calls") or [] if c["id"] not in answered]
+    note = "interrupted by the user before this call finished; it may have run partly or not at all: check the files before relying on it"
+    if not missing:
+        return messages                                  # the same list: the caller can tell that nothing had to be added
+    return messages + [{"role": "tool", "tool_call_id": cid, "content": note} for cid in missing]
 
 
 def _assistant_message(resp: ModelResponse) -> dict:

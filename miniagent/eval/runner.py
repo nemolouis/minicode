@@ -11,12 +11,27 @@ from pathlib import Path
 
 from ..agent import SYSTEM_PROMPT, Agent
 from ..mcp.client import mcp_session
+from ..budget import Budget
 from ..permissions import Permissions
 from ..sandbox import Sandbox, SandboxError
 from ..tools import Workspace
 from ..trajectory import Trajectory
 from .grade import add_hidden, classify, copy_repo, restore_tests, run_tests, trajectory_stats
 from .tasks import Task
+
+
+def budget_from_config(cfg: dict) -> Budget | None:
+    """A Budget from `max_cost_usd` / `max_total_tokens` (price: `prices_file`, tier `price_tier`); None if no limit is configured."""
+    if cfg.get("max_cost_usd") is None and cfg.get("max_total_tokens") is None:
+        return None
+    price = None
+    if cfg.get("max_cost_usd") is not None:
+        path = Path(cfg.get("prices_file", "configs/prices.json"))
+        entry = json.loads(path.read_text()).get(cfg["model"]) if path.exists() else None
+        price = (entry or {}).get(cfg.get("price_tier", "off_peak"))
+        if not price:
+            raise ValueError(f"max_cost_usd needs a price for model {cfg['model']!r} in {path}")
+    return Budget(max_cost_usd=cfg.get("max_cost_usd"), max_total_tokens=cfg.get("max_total_tokens"), price=price)
 
 
 def config_hash(cfg: dict) -> str:
@@ -58,6 +73,8 @@ def _run_one(task: Task, cfg: dict, repeat: int, out_dir: Path, client, keep_wor
                 client=client, model=cfg["model"], workspace=Workspace(work, sandbox=sb, edit_hints=bool(cfg.get("edit_hints", False)),
                                     require_read=bool(cfg.get("require_read", False)), diagnostics=bool(cfg.get("diagnostics", False))),
                 permissions=Permissions.from_dict(cfg.get("permissions")),
+                stuck_warn_after=cfg.get("stuck_warn_after", 0), stuck_stop_after=cfg.get("stuck_stop_after", 6),
+                budget=budget_from_config(cfg), output_budget=bool(cfg.get("output_budget", False)),
                 trajectory=Trajectory(traj_dir), max_steps=cfg.get("max_steps", 30),
                 max_tokens=cfg.get("max_tokens", 4096), context_limit=cfg.get("context_limit", 100_000),
                 keep_recent=cfg.get("keep_recent", 8), compact_regrowth=cfg.get("compact_regrowth", 1.0), system=system,

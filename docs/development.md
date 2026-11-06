@@ -17,7 +17,7 @@ make check          # ruff + pytest + 黄金轨迹的格式检查（CI 跑的就
 | 评测配置严格校验 | `miniagent/eval/config.py`，`tests/test_config.py` | 配置里的拼写错误（如 `require_reed`）曾经会被静默忽略，实验照跑但什么也没测；现在未知键、错类型、越界值、不存在的功能名/工具名/文件都直接报错，所有 `configs/*.json` 有测试保证合法 |
 | 运行溯源 | `miniagent/provenance.py` | `meta.json` 和每条 `run_start` 记录 git 提交号、工作区是否有未提交改动、Python 版本；数字能对回产生它的代码 |
 | 轨迹格式 | `miniagent/trajectory.py`（`SCHEMA_VERSION`、`validate_events`）| 格式是可执行的：`tests/conftest.py` 让**每个测试**产生的轨迹自动过一遍校验；`miniagent-eval check-trajectories <路径>` 可检查任意轨迹（没有 `schema_version` 的旧轨迹只做宽松检查） |
-| 黄金轨迹回放 | `tests/golden/`，`scripts/make_golden.py`，`tests/test_golden_replay.py` | 4 条脚本化的轨迹（直路径、错误与恢复、两种压缩、步数耗尽）在真实任务上录制，每次测试都用**当前**主循环回放，调用、错误、压缩时机、结束方式、工具输出都必须一致。里面没有第三方模型输出（模型是脚本，答案取自任务的参考解）。故意改变行为后用 `make golden` 重新生成并审阅 diff |
+| 黄金轨迹回放 | `tests/golden/`，`scripts/make_golden.py`，`tests/test_golden_replay.py` | 7 条脚本化的轨迹（直路径、错误与恢复、两种压缩、步数耗尽、卡住检测、费用上限、`apply_patch` + `symbols`）在真实任务上录制，每次测试都用**当前**主循环回放，调用、错误、压缩时机、结束方式、工具输出都必须一致。里面没有第三方模型输出（模型是脚本，答案取自任务的参考解）。故意改变行为后用 `make golden` 重新生成并审阅 diff |
 | 变异检验 | 无脚本，是做法 | 写完测试后逐个破坏实现（去掉一道检查、改一个阈值），确认测试会失败；活下来的变异要么补测试，要么证明是冗余防线。最近一轮：执行器、压缩、会话、权限、MCP HTTP 约 100 处，最终幸存的都是冗余检查 |
 | 文档链接 | `tests/test_docs_links.py` | README 拆分后相对链接不能断 |
 

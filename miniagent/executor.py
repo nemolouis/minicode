@@ -22,6 +22,7 @@ class ToolExecutor:
                  permissions: Permissions | None = None, validate_args: bool = True, parallel: bool = True):
         self.tools, self.confirm, self.trajectory, self.root = tools, confirm, trajectory, root
         self.permissions, self.validate_args, self.parallel = permissions, validate_args, parallel
+        self.last_results: list[dict] = []        # the raw results of the latest run(), in call order (for the stuck detector)
 
     # ---------------------------------------------------------------- a turn
     def run(self, step: int, calls: list[dict]) -> list[dict]:
@@ -29,6 +30,7 @@ class ToolExecutor:
         calls run concurrently; anything else (writes, bash, calls needing confirmation, bad calls) runs alone and in order, so it
         acts as a barrier. The `tool_result` log lines come out in the same order."""
         out: list[dict] = []
+        self.last_results = []
         i = 0
         while i < len(calls):
             j = i
@@ -41,9 +43,12 @@ class ToolExecutor:
                     futures = [pool.submit(self.execute, c) for c in batch]
                     results = [f.result() for f in futures]           # SandboxError (infrastructure fault) re-raises here
                 out += [self._log(step, c, r, parallel=len(batch)) for c, r in zip(batch, results)]
+                self.last_results += results
                 i = j
             else:
-                out.append(self._log(step, calls[i], self.execute(calls[i])))
+                r = self.execute(calls[i])
+                out.append(self._log(step, calls[i], r))
+                self.last_results.append(r)
                 i += 1
         return out
 

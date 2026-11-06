@@ -19,6 +19,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from miniagent.agent import Agent                                    # noqa: E402
+from miniagent.budget import Budget                                 # noqa: E402
 from miniagent.client import ModelResponse, ToolCall                 # noqa: E402
 from miniagent.eval.grade import copy_repo                           # noqa: E402
 from miniagent.eval.tasks import load_tasks                          # noqa: E402
@@ -107,6 +108,28 @@ def main() -> None:
     t = "01-moving-average"
     (f, _), = solution(t).items()
     record("max-steps-01", t, [([call(str(i), "grep", pattern="moving")], 500 + i) for i in range(4)], max_steps=4)
+
+    # 5. stuck detector: the same grep with the same result again and again: two warnings, then the run is stopped
+    t = "01-moving-average"
+    record("stuck-01", t, [([call(str(i), "grep", pattern="moving_average")], 600 + i) for i in range(6)],
+           stuck_warn_after=3, stuck_stop_after=5)
+
+    # 6. cost budget: the run stops before the request that would exceed it (price: 1 USD per 1M uncached input tokens)
+    record("budget-01", t, [([call(str(i), "grep", pattern=f"p{i}")], 600) for i in range(6)],
+           budget=Budget(max_cost_usd=0.001, price={"input": 1.0, "cache_read": 0.1, "output": 2.0}))
+
+    # 7. the opt-in tools: an outline with `symbols`, then the fix as one apply_patch (whole old body replaced by the reference body)
+    t = "01-moving-average"
+    (f, content), = solution(t).items()
+    old = (ROOT / "tasks" / t / "repo" / f).read_text().splitlines()
+    patch = "\n".join(["*** Begin Patch", f"*** Update File: {f}", *[f"-{l}" for l in old], *[f"+{l}" for l in content.splitlines()],
+                       "*** End Patch"])
+    record("patch-01", t, [
+        ([call("a", "symbols", path=".")], 700),
+        ([call("b", "read_file", path=f)], 900),
+        ([call("c", "apply_patch", patch=patch)], 1200),
+        ([call("d", "bash", command="python -c \"from stats import moving_average as m; print(m([1, 2, 3, 4], 2))\"")], 1300),
+        (["Patched moving_average."], 1400)], features=("patch", "symbols"))
 
 
 if __name__ == "__main__":

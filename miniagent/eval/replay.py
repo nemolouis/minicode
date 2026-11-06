@@ -15,6 +15,7 @@ import tempfile
 from pathlib import Path
 
 from ..agent import SYSTEM_PROMPT, Agent
+from ..budget import Budget
 from ..permissions import Permissions
 from ..replay import ReplayMiss, TrajectoryReplayClient
 from ..tools import Workspace, build_tools
@@ -60,7 +61,13 @@ def replay_run(traj_path: str | Path, tasks_root: str | Path = "tasks") -> dict:
     if "explore" in features:
         return {"status": "skipped", "reason": "uses the explore sub-agent: its model calls are recorded in separate trajectories, "
                                                "so the parent cannot be replayed alone"}
+    if "background" in features:
+        return {"status": "skipped", "reason": "uses background shell jobs: their output depends on timing, so the run cannot be replayed"}
     builtin = set(build_tools(Workspace(".")))
+    if "patch" in features:
+        builtin.add("apply_patch")
+    if "symbols" in features:
+        builtin.add("symbols")
     if "glob" in features:
         builtin.add("glob")
     if "todo" in features:
@@ -90,6 +97,8 @@ def replay_run(traj_path: str | Path, tasks_root: str | Path = "tasks") -> dict:
         agent = Agent(
             client=client, model=start["model"], workspace=Workspace(work, **cfg.get("workspace_options", {})), trajectory=Trajectory(new_dir),
             permissions=Permissions.from_dict(cfg.get("permissions")),
+            stuck_warn_after=cfg.get("stuck", {}).get("warn_after", 0), stuck_stop_after=cfg.get("stuck", {}).get("stop_after", 6),
+            budget=Budget(**cfg["budget"]) if cfg.get("budget") else None, output_budget=bool(cfg.get("output_budget", False)),
             max_steps=cfg["max_steps"], max_tokens=cfg["max_tokens"], context_limit=cfg["context_limit"],
             keep_recent=cfg["keep_recent"], compact_regrowth=cfg.get("compact_regrowth", 1.0),
             temperature=cfg.get("temperature"), disabled_tools=tuple(sorted(builtin - set(cfg["tools"]))),

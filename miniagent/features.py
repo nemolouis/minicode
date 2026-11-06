@@ -5,12 +5,13 @@ All three are off by default so existing configs, trajectories and replays are u
 """
 from __future__ import annotations
 
+import os
 import threading
 from pathlib import Path
 
 from .tools import Tool, ToolError, truncate
 
-FEATURES = {"memory", "todo", "explore", "glob"}
+FEATURES = {"memory", "todo", "explore", "glob", "patch", "symbols", "background"}
 
 # ------------------------------------------------------------------ project memory
 MEMORY_FILES = ("AGENTS.md", "CLAUDE.md")
@@ -68,6 +69,47 @@ def todo_tool(agent) -> Tool:
                 "Keep a todo list for a task with three or more steps. Each call REPLACES the whole list. Keep at most one item "
                 "in_progress; mark an item completed only after you have verified it (e.g. the tests pass).",
                 {"type": "object", "properties": {"todos": {"type": "array", "items": item}}, "required": ["todos"]}, run)
+
+
+# ------------------------------------------------------------------ background shell jobs
+def background_tools(agent) -> dict[str, Tool]:
+    from .background import BackgroundJobs, JobError
+    from .safety import check_command
+    if agent.workspace.sandbox is not None:
+        raise ValueError("the 'background' feature is not available with the Docker sandbox: a host process would defeat the sandbox")
+    jobs = agent.background = BackgroundJobs(agent.workspace.root, env={**os.environ, "GIT_PAGER": "cat", "PAGER": "cat"})
+
+    def start(args: dict) -> str:
+        reason = check_command(args["command"])
+        if reason:
+            raise ToolError(f"command blocked by safety policy: {reason}")
+        try:
+            job = jobs.start(args["command"])
+        except JobError as e:
+            raise ToolError(str(e))
+        return f"started {job.id} (pid {job.proc.pid}). Read its output with bash_output, stop it with bash_kill."
+
+    def output(args: dict) -> str:
+        try:
+            return jobs.read(args["job_id"], tail=args.get("tail"))
+        except JobError as e:
+            raise ToolError(str(e))
+
+    def kill(args: dict) -> str:
+        try:
+            return jobs.kill(args["job_id"])
+        except JobError as e:
+            raise ToolError(str(e))
+
+    S = lambda **p: {"type": "object", "properties": p, "required": [k for k in p if k != "tail"]}
+    return {
+        "bash_background": Tool("bash_background", "Start a long-running shell command (dev server, watcher, slow test run) in the "
+                                "background in the workspace root; returns a job id at once. At most 4 jobs at a time; they are all "
+                                "stopped when the run ends.", S(command={"type": "string"}), start, needs_confirm=True),
+        "bash_output": Tool("bash_output", "New output of a background job since you last read it (or the last `tail` lines), and "
+                            "whether it is still running.", S(job_id={"type": "string"}, tail={"type": "integer"}), output, read_only=True),
+        "bash_kill": Tool("bash_kill", "Stop a background job (and everything it started).", S(job_id={"type": "string"}), kill),
+    }
 
 
 # ------------------------------------------------------------------ explore sub-agent

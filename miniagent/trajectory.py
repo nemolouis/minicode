@@ -18,7 +18,9 @@ Events (all carry `ts` and `event`):
   checkpoint   step, files, skipped_large, complete  (a workspace copy taken before the step's tools ran)
   rewind       to_step, restored, removed  (appended by `miniagent --rewind`; the steps from to_step on, above this line, are an
                abandoned branch: later steps are numbered again from to_step, so a reader must not merge the two)
-  run_end      status, steps, input_tokens, output_tokens (sub-agent tokens included), final_text
+  stuck        step, tool_call_id, kind ("repeat"|"errors"), count, action ("warn"|"stop")  (see miniagent.stuck)
+  budget       step, reason, spent_tokens, spent_usd?  (the run stops before the next request: status "budget")
+  run_end      status, steps, input_tokens, output_tokens (sub-agent tokens included), final_text, cost_usd? (when a price is known)
 
 The message list is append-only apart from `compaction`, so a reader can rebuild the exact model input at any step by replaying
 events in order.
@@ -61,10 +63,12 @@ _REQUIRED: dict[str, dict[str, object]] = {
     "subagent": {"name": str, "index": int, "question": str, "status": str, "steps": int, "input_tokens": int, "output_tokens": int,
                  "final_text": str},
     "checkpoint": {"step": int, "files": int, "skipped_large": int, "complete": bool},
+    "stuck": {"step": int, "tool_call_id": str, "kind": str, "count": int, "action": str},
+    "budget": {"step": int, "reason": str, "spent_tokens": int},
     "rewind": {"to_step": int, "restored": int, "removed": int},
     "run_end": {"status": str, "steps": int, "input_tokens": int, "output_tokens": int, "final_text": str},
 }
-_OPTIONAL = {"tool_result": {"parallel": int, "permission": str, "rule": str}}
+_OPTIONAL = {"tool_result": {"parallel": int, "permission": str, "rule": str}, "budget": {"spent_usd": _NUM}, "run_end": {"cost_usd": _NUM}}
 
 
 def validate_events(events: list[dict]) -> list[str]:

@@ -20,7 +20,7 @@ def events(name):
 
 
 def test_golden_set_is_present():
-    assert NAMES == ["compaction-03", "errors-05", "max-steps-01", "solve-01"]
+    assert NAMES == ["budget-01", "compaction-03", "errors-05", "max-steps-01", "patch-01", "solve-01", "stuck-01"]
 
 
 @pytest.mark.parametrize("name", NAMES)
@@ -45,4 +45,11 @@ def test_the_golden_set_covers_what_it_is_meant_to_cover():
         assert needle in texts, needle
     assert [e["kind"] for e in ev["compaction-03"] if e["event"] == "compaction"] == ["elide", "elide", "summary"]
     assert ev["max-steps-01"][-1]["status"] == "max_steps"
+    assert [(e["count"], e["action"]) for e in ev["stuck-01"] if e["event"] == "stuck"] == [(3, "warn"), (4, "warn"), (5, "stop")]
+    assert ev["stuck-01"][-1]["status"] == "stuck"
+    assert any(e["event"] == "budget" for e in ev["budget-01"]) and ev["budget-01"][-1]["status"] == "budget"
+    assert ev["budget-01"][-1]["cost_usd"] > 0.001
+    patch_calls = [e for e in ev["patch-01"] if e["event"] == "tool_result"]
+    assert [e["name"] for e in patch_calls] == ["symbols", "read_file", "apply_patch", "bash"] and not any(e["is_error"] for e in patch_calls)
+    assert "applied patch: updated stats.py" in patch_calls[2]["output"] and "def moving_average" in patch_calls[0]["output"]
     assert kinds("solve-01")[-1] == "run_end"

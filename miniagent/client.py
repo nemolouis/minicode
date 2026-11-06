@@ -128,10 +128,14 @@ class ChatClient:
 
     def chat(self, *, model: str, messages: list[dict], system: str | None = None,
              tools: list[dict] | None = None, max_tokens: int = 4096,
-             temperature: float | None = None) -> ModelResponse:
-        impl = self._chat_gemini if self.api_style == "gemini" else self._chat_openai
-        return impl(model=model, messages=messages, system=system, tools=tools,
-                    max_tokens=max_tokens, temperature=temperature)
+             temperature: float | None = None, on_text=None) -> ModelResponse:
+        """`on_text(delta)` makes the request a streaming one (OpenAI-compatible style only): it is called with every piece of reply text
+        as it arrives; the returned ModelResponse is the same as without streaming. The Gemini style ignores it (no streaming there)."""
+        if self.api_style == "gemini":
+            return self._chat_gemini(model=model, messages=messages, system=system, tools=tools,
+                                     max_tokens=max_tokens, temperature=temperature)
+        return self._chat_openai(model=model, messages=messages, system=system, tools=tools,
+                                 max_tokens=max_tokens, temperature=temperature, on_text=on_text)
 
     # ------------------------------------------------------------------ Gemini native
     @staticmethod
@@ -236,7 +240,7 @@ class ChatClient:
     # ------------------------------------------------------------------ OpenAI-style
     def _chat_openai(self, *, model: str, messages: list[dict], system: str | None = None,
                      tools: list[dict] | None = None, max_tokens: int = 4096,
-                     temperature: float | None = None) -> ModelResponse:
+                     temperature: float | None = None, on_text=None) -> ModelResponse:
         body: dict = {
             "model": model,
             "max_tokens": max_tokens,
@@ -247,7 +251,12 @@ class ChatClient:
         if temperature is not None:
             body["temperature"] = temperature
         body.update(self.extra_body)
-        data = self._post("/chat/completions", body)
+        if on_text is not None:
+            body["stream"] = True
+            body["stream_options"] = {"include_usage": True}
+            data = self._post_stream("/chat/completions", body, on_text)
+        else:
+            data = self._post("/chat/completions", body)
         try:
             choice = data["choices"][0]
             msg = choice["message"]
@@ -310,6 +319,37 @@ class ChatClient:
         base = 5.0 if status == 429 else 1.0
         return min(base * 2 ** attempt, 60.0) + random.random()
 
+    def _post_stream(self, path: str, body: dict, on_text) -> dict:
+        """A streaming chat-completions request, folded back into the shape of a non-streaming response (so the parsing above is shared).
+        Connection and HTTP errors before the first byte are retried like in `_post`; once data has started to arrive a broken stream
+        is an APIError (the partial text was already shown, so retrying would repeat it)."""
+        req = urllib.request.Request(
+            self.base_url + path, data=json.dumps(body).encode("utf-8"), method="POST",
+            headers={"Content-Type": "application/json", "Accept": "text/event-stream", "Authorization": f"Bearer {self.api_key}"})
+        for attempt in range(self.retries + 1):
+            try:
+                resp = urllib.request.urlopen(req, timeout=self.timeout)
+            except urllib.error.HTTPError as e:
+                full = e.read().decode("utf-8", "replace")
+                wait = suggested_delay(full) if e.code == 429 else None
+                if wait is not None and wait > QUOTA_WAIT_LIMIT_S:
+                    raise QuotaExhausted(f"HTTP 429 quota exhausted, server says retry in {wait / 3600:.1f} h: {full[:500]}", wait)
+                if e.code in _RETRY_STATUS and attempt < self.retries:
+                    time.sleep(min(wait + 1.0, 120.0) if wait is not None else self._delay(attempt, e.code, e.headers.get("Retry-After")))
+                    continue
+                raise APIError(f"HTTP {e.code}: {full[:500]}")
+            except (urllib.error.URLError, TimeoutError) as e:
+                if attempt < self.retries:
+                    time.sleep(self._delay(attempt, None, None))
+                    continue
+                raise APIError(f"network error: {e}")
+            with resp:
+                try:
+                    return _fold_stream(resp, on_text)
+                except (OSError, TimeoutError) as e:
+                    raise APIError(f"stream interrupted: {e}")
+        raise APIError("unreachable")
+
     def _post(self, path: str, body: dict) -> dict:
         req = urllib.request.Request(
             self.base_url + path, data=json.dumps(body).encode("utf-8"), method="POST",
@@ -340,6 +380,55 @@ class ChatClient:
                     continue
                 raise APIError(f"network error: {e}")
         raise APIError("unreachable")
+
+
+def _fold_stream(resp, on_text) -> dict:
+    """Read a chat-completions event stream and return the equivalent non-streaming response dict: content and reasoning deltas are
+    concatenated (content is also passed to `on_text` as it arrives), tool-call deltas are merged by index, the last chunk carries usage."""
+    text, reasoning, calls, finish, usage, model = [], [], {}, None, None, ""
+    while True:
+        raw = resp.readline()
+        if not raw:
+            break
+        line = raw.decode("utf-8", "replace").strip()
+        if not line.startswith("data:"):
+            continue
+        payload = line[5:].strip()
+        if payload == "[DONE]":
+            break
+        try:
+            chunk = json.loads(payload)
+        except ValueError:
+            continue
+        if not isinstance(chunk, dict):
+            continue
+        if isinstance(chunk.get("error"), dict):
+            raise APIError(f"stream error: {str(chunk['error'])[:300]}")
+        model = chunk.get("model") or model
+        usage = chunk.get("usage") or usage
+        for choice in chunk.get("choices") or []:
+            delta = choice.get("delta") or {}
+            if delta.get("content"):
+                text.append(delta["content"])
+                on_text(delta["content"])
+            if delta.get("reasoning_content"):
+                reasoning.append(delta["reasoning_content"])
+            for tc in delta.get("tool_calls") or []:
+                slot = calls.setdefault(tc.get("index", len(calls)), {"function": {"name": "", "arguments": ""}})
+                if tc.get("id"):
+                    slot["id"] = tc["id"]
+                fn = tc.get("function") or {}
+                slot["function"]["name"] += fn.get("name") or ""
+                slot["function"]["arguments"] += fn.get("arguments") or ""
+                for k, v in tc.items():
+                    if k not in ("index", "id", "type", "function"):
+                        slot[k] = v
+            finish = choice.get("finish_reason") or finish
+    if finish is None and not text and not calls and usage is None:
+        raise APIError("stream ended without any data")
+    msg = {"content": "".join(text), "reasoning_content": "".join(reasoning),
+           "tool_calls": [calls[i] for i in sorted(calls)] or None}
+    return {"model": model, "usage": usage or {}, "choices": [{"message": msg, "finish_reason": finish}]}
 
 
 def _deep_update(dst: dict, src: dict) -> dict:

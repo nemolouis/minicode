@@ -17,7 +17,7 @@
 
 | 部分 | 状态 | 说明 |
 |---|---|---|
-| M1 agent 主循环与工具 | 完成 | 见 [docs/features.md](docs/features.md)；全仓库 541 个测试（不调用模型；需要 Docker 的测试在没有 Docker 时自动跳过，当前环境 508 通过、33 跳过；Python 3.10 和 3.12 结果相同） |
+| M1 agent 主循环与工具 | 完成 | 见 [docs/features.md](docs/features.md)；全仓库 637 个测试（不调用模型；需要 Docker 的测试在没有 Docker 时自动跳过，当前环境 604 通过、33 跳过） |
 | M2 评测 harness | 完成 | 任务集、dev/test 划分、隐藏测试、规则化判分、配对对比、断点续跑；实验结果见 [docs/eval.md](docs/eval.md)；test 集未跑 |
 | M3 轨迹回放 | 完成 | `miniagent-eval view`：浏览所有运行、逐步回放、两次运行并排对比；未做按条件导出轨迹 |
 | M4 MCP server | 完成 | 手写的 MCP 笔记服务器 + 客户端（stdio 和 Streamable HTTP）+ 越界/越权测试（见 [docs/mcp-and-service.md](docs/mcp-and-service.md)）；已用官方 `mcp` SDK 2.3.0 做双向互操作检查（17/17，见 `scripts/mcp_interop.py`） |
@@ -152,6 +152,7 @@ agent 会执行模型生成的命令，存在风险：
 - [x] 先读后改、改后诊断、权限规则、会话恢复/回退、MCP Streamable HTTP 客户端（有测试和变异检验）
 - [x] 上述功能在 flash 上的 dev 评测（见 [docs/eval.md](docs/eval.md) 的"可选功能的评测结果"）：功能几乎没被触发，结果在噪声内
 - [x] 工程化（2026-11）：评测配置严格校验、运行溯源、轨迹格式版本与校验器、黄金轨迹回放回归、CI + ruff + Python 3.10–3.13、`agent.py` 拆分为主循环 / 执行器 / 压缩 / 会话、查看器认识新事件、results 索引；见 [docs/development.md](docs/development.md)
+- [x] 第二轮对标补缺（2026-11）：卡住检测、花费上限、`apply_patch`、输出分页与按上下文缩放的输出上限、后台命令、`symbols` 大纲、流式输出与 Ctrl-C 可恢复（有测试和变异检验；**没有用真实模型评测过**，见 [docs/features.md](docs/features.md)）
 - [ ] 在弱模型上评测先读后改 / todo / explore（flash 上无信息量）；跑一次 test 集
 - [ ] 上下文工程(可选):摘要 vs 结构化笔记
 

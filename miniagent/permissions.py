@@ -78,6 +78,11 @@ def parse_rule(text: str) -> Rule:
     return Rule(text.strip(), _glob_to_regex(m.group(1), path=False), m.group(2))
 
 
+# apply_patch writes files, so the rules written for the single-file tools apply to it as well (a deny on `write_file(.env*)` must
+# not be dodged by putting the same change in a patch)
+_ALIASES = {"apply_patch": ("apply_patch", "edit_file", "write_file")}
+
+
 def _subject(name: str, args: dict) -> str | None:
     if name == "bash":
         v = args.get("command")
@@ -128,9 +133,38 @@ class Permissions:
     def to_dict(self) -> dict:
         return {k: [r.text for r in getattr(self, k)] for k in ("allow", "ask", "deny")}
 
+    def _decide_patch(self, args: dict, root) -> Decision:
+        """A patch touches several paths: deny/ask fire if ANY path matches a rule (of apply_patch, edit_file or write_file); allow
+        needs EVERY path to be covered by an allow rule."""
+        from .patch import patch_paths
+        paths = []
+        for raw in patch_paths(args.get("patch")):
+            if root is not None and raw.startswith("/"):
+                try:
+                    raw = str(Path(raw).relative_to(root))
+                except ValueError:
+                    pass
+            paths.append(_norm_path(raw))
+        if not paths:
+            return Decision("default")
+        names = _ALIASES["apply_patch"]
+        for rules, action in ((self.deny, "deny"), (self.ask, "ask")):
+            for r in rules:
+                if any(r.matches_subject(n, p) for p in paths for n in names):
+                    return Decision(action, r.text)
+        used = []
+        for p in paths:
+            hit = next((r for r in self.allow if any(r.matches_subject(n, p) for n in names)), None)
+            if hit is None:
+                return Decision("default")
+            used.append(hit.text)
+        return Decision("allow", used[0])
+
     def decide(self, name: str, args: dict, root=None) -> Decision:
         """`root`: the workspace root; an absolute path inside it is matched as the relative path, so `/work/repo/.env`
         cannot dodge a `.env*` rule. (Symlinks inside the workspace are not followed here: they are a limit of path rules.)"""
+        if name == "apply_patch":
+            return self._decide_patch(args, root)
         subject = _subject(name, args)
         if name != "bash" and subject is not None:
             if root is not None and subject.startswith("/"):

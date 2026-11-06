@@ -94,6 +94,10 @@ def classify(events: list[dict], passed: bool, tampered: bool, changed_files: li
         return "max_steps"
     if status == "length":
         return "max_tokens"
+    if status == "stuck":
+        return "stuck"
+    if status == "budget":
+        return "over_budget"
     if status != "done":
         return f"stopped_{status}"      # e.g. content_filter
     # Editing test files is recorded as a flag (tampered_tests) but is not a failure class of its own:

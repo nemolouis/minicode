@@ -137,6 +137,8 @@ function buildRun(events) {
     if (e.event === "run_start") run.start = e;
     else if (e.event === "run_end") run.end = e;
     else if (e.event === "compaction") pending.push(e);
+    else if (e.event === "stuck") pendingMarks.push("stuck detector (" + e.kind + " ×" + e.count + "): " + e.action);
+    else if (e.event === "budget") pendingMarks.push("budget: " + e.reason + " — the run stopped before step " + e.step);
     else if (e.event === "run_resume") pendingMarks.push("session resumed with a new instruction: " + clip(e.task, 120));
     else if (e.event === "rewind") pendingMarks.push("rewound to step " + e.to_step + " (" + e.restored + " files restored, " + e.removed + " removed): the steps above from " + e.to_step + " on were abandoned");
     else if (e.event === "model_call") {
@@ -153,7 +155,7 @@ function buildRun(events) {
       if (owner) owner.results.push(e);
     }
   }
-  run.trailing = pending;
+  run.trailing = pending; run.trailingMarks = pendingMarks;
   const t = { calls: run.steps.length, inTok: 0, outTok: 0, cached: 0, reasoning: 0, model: 0, tool: 0,
     compSummary: 0, compElide: 0, toolErrors: 0, toolCalls: 0 };
   for (const s of run.steps) {
@@ -289,6 +291,7 @@ function renderSingle(root) {
       h("button", { onclick: () => document.querySelectorAll("#app .step details").forEach(d => d.open = false) }, "collapse all"),
       h("button", { onclick: () => document.querySelectorAll("#app .call .result details").forEach(d => d.open = true) }, "expand tool results")),
     run.steps.map(s => stepCard(s, "A")), run.trailing.map(c => h("div", { class: "banner" }, "compaction (" + c.kind + ") at the end")),
+    (run.trailingMarks || []).map(m => h("div", { class: "banner" }, m)),
     endBanner(run)].flat().filter(Boolean));   // native append() does not flatten arrays
 }
 function callKey(step) { return step.call.calls.map(c => c.name + ":" + stable(c.input)).join("|") || "∅:" + (step.call.finish || ""); }
